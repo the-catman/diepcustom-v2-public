@@ -1,0 +1,4 @@
+.vscode/
+client/build/
+client/dist/
+client/test/build/
