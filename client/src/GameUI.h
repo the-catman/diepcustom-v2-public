@@ -6,11 +6,11 @@
 #include <vector>
 
 #include "Const.h"
+#include "GameRendering.h"
 #include "cp5/Context.h"
 #include "sim/Simulation.h"
 
 class Game;
-class GameRendering;
 
 // Installs window.input (execute / get_convar / set_convar / print_convar_help).
 void installConsoleApi();
@@ -61,6 +61,7 @@ private:
         int col = -1;
         int row = -1;
         uint32_t color = 0;
+        GameRendering::TankIcon icon;
     };
 
     float spawnAlpha = 0;
@@ -71,6 +72,7 @@ private:
     double screensAfter = 0;
     bool enterPressed = false;
     float deathAlpha = 0;
+    GameRendering::TankIcon deathIcon;
     float dimAlpha = 0;
     float stackAlpha = 0;
     float waitAlpha = 0;
@@ -161,11 +163,28 @@ private:
         int sibling = 0; // index among the parent's children, picks the palette color
         double start = 0, end = 0;
         std::vector<int> children;
-        double iconScale = 1;
-        bool iconReady = false;
+        GameRendering::TankIcon icon;
     };
     std::vector<TreeNode> treeNodes; // [0] is the root
-    std::vector<int> treeOrder;      // post-order, then sorted by level (deepest first)
+    // A ring sector from level inner to outer; node -1 is a grey connector. index is its place
+    // in the draw order, which staggers the icon re-renders.
+    struct TreeSector {
+        int node;
+        double start, end;
+        int inner, outer;
+        int index;
+    };
+    // Sectors sharing an inner level grow, spin and fade together, so each ring is drawn once
+    // into its own canvas (full size, no spin) and blitted, the icons drawn over it.
+    struct TreeRing {
+        int inner = 0;
+        std::vector<TreeSector> sectors;
+        std::unique_ptr<cp5::Context> canvas;
+    };
+    std::vector<TreeRing> treeRings; // deepest first
+    // What the ring canvases were drawn with.
+    double treeRingRadius = 0;
+    uint32_t treeRingPalette[8] = {};
     bool treeBuilt = false;
     float treeFade = 0;
     int treeFrame = 0;
@@ -187,8 +206,7 @@ private:
     void renderUpgrades(cp5::Context& ctx, Game& game, double now, double ui, double mx, double my);
     int buildTreeNode(int tankId, int sibling, int depth);
     void renderClassTree(cp5::Context& ctx, Game& game, double now, bool hasPlayer);
-    void drawTreeSector(cp5::Context& ctx, Game& game, int node, double a0, double a1, int inner, int outer,
-                        uint32_t color, double radius, double iconScale, int index);
+    void drawTreeRing(TreeRing& ring, double radius, double lineWidth);
     void renderConnecting(cp5::Context& ctx, Game& game, double ui);
     void renderConsole(cp5::Context& ctx, Game& game, double ui, double now);
     void drawButton(cp5::Context& ctx, double x, double y, double w, double h, uint32_t rgb,

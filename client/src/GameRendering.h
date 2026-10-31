@@ -40,8 +40,19 @@ public:
     void drawTextBox(cp5::Context& ctx, const std::string& text, const TextBox& box, double left, double top,
                      double size, uint32_t fill, bool stroke = true, uint32_t strokeColor = 0x000000,
                      double strokeRatio = 0.2);
-    void drawTankPreview(cp5::Context& ctx, int tankId, double cx, double cy, double angle, double scale,
-                         bool centerAroundAABB = false);
+    // A tank preview rendered once into its own canvas and blitted from then on. It redraws
+    // when the tank, scale or preview look changes.
+    struct TankIcon {
+        std::unique_ptr<cp5::Context> canvas;
+        int tankId = -1;
+        double scale = 0;
+        int look = -1;
+        // The AABB center from the tank origin, in pixels.
+        double centerX = 0, centerY = 0;
+    };
+    // With render false a stale icon is skipped instead of redrawn.
+    void drawTankIcon(cp5::Context& ctx, TankIcon& icon, int tankId, double cx, double cy, double angle, double scale,
+                      bool centerAroundAABB = false, bool render = true);
     void renderHUD(cp5::Context& ctx, Simulation& sim, double now, double mouseX, double mouseY,
                    int playersOnline, const std::string& pingText, bool hudVisible);
     void onNewConnection();
@@ -74,6 +85,25 @@ private:
     float scoreBarPerc = 0;
     float scoreboardVals[10] = {};
     float scoreboardHover[10] = {};
+    TankIcon scoreboardIcons[10];
+
+    // Everything a preview's pixels depend on besides the tank and scale. previewLookId
+    // counts its changes; icons drawn under an older one redraw.
+    struct PreviewLook {
+        uint32_t border = 0, barrel = 0, solidStroke = 0;
+        double strokeIntensity = 0;
+        bool softStroke = false, debugCollisions = false;
+        int tankDefs = -1;
+        bool operator==(const PreviewLook& o) const {
+            return border == o.border && barrel == o.barrel && solidStroke == o.solidStroke &&
+                   strokeIntensity == o.strokeIntensity && softStroke == o.softStroke &&
+                   debugCollisions == o.debugCollisions && tankDefs == o.tankDefs;
+        }
+    };
+    PreviewLook previewLook;
+    int previewLookId = 0;
+    void updatePreviewLook();
+    void renderTankIcon(TankIcon& icon, int tankId, double scale);
     double screenRectX = 0, screenRectY = 0, screenRectW = 0, screenRectH = 0;
 
     std::vector<std::unique_ptr<cp5::Context>> scratchPool;

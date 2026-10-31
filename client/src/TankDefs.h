@@ -9,6 +9,8 @@ namespace tankdefs {
     void reload(const char* name, const char* interval);
     std::string name(int tankId);
     int count();
+    // Bumped whenever the tank defs (re)arrive.
+    int version();
     int levelRequirement(int tankId);
     int bodySides(int tankId);
     // Fills out[maxCount][8] with (angle, size, width/42, offset, isTrapezoid,

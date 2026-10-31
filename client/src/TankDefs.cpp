@@ -14,6 +14,7 @@ EM_JS(void, tankdefs_fetch_js, (), {
                     if (tank) Module.tankNames[tank.id] = tank.name;
                 }
                 Module.tankDefs = defs;
+                Module.tankDefsVersion = (Module.tankDefsVersion || 0) + 1;
             },
             servers: list => { Module.gameServers = list; },
             commands: list => { Module.serverCommands = list; },
@@ -83,6 +84,10 @@ EM_JS(char*, tankdefs_name_js, (int id), {
 EM_JS(int, tankdefs_count_js, (), {
     if (!Module.tankDefs) return 0;
     return Module.tankDefs.filter(function(t) { return !!t; }).length;
+});
+
+EM_JS(int, tankdefs_version_js, (), {
+    return Module.tankDefsVersion || 0;
 });
 
 EM_JS(int, tankdefs_levelreq_js, (int id), {
@@ -193,6 +198,7 @@ std::string name(int tankId) {
 }
 
 int count() { return tankdefs_count_js(); }
+int version() { return tankdefs_version_js(); }
 int levelRequirement(int tankId) { return tankdefs_levelreq_js(tankId); }
 int bodySides(int tankId) { return tankdefs_sides_js(tankId); }
 int barrels(int tankId, float* out, int maxCount) { return tankdefs_barrels_js(tankId, out, maxCount); }

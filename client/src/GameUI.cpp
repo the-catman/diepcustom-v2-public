@@ -479,7 +479,7 @@ void GameUI::renderDeathScreen(cp5::Context& ctx, Game& game, double now, double
     centered(killer, killerBox, top + byBox.h, 24 * ui);
     if (unnamed) centered(mystery, mysteryBox, top + byBox.h + killerBox.h + (float)(-5 * ui), 14 * ui);
 
-    game.rendering.drawTankPreview(ctx, cam.tank, 100 * ui, -20 * ui, -M_PI / 4, 0.7 * ui);
+    game.rendering.drawTankIcon(ctx, deathIcon, cam.tank, 100 * ui, -20 * ui, -M_PI / 4, 0.7 * ui);
     std::string tank = !cam.tankOverride.empty() ? cam.tankOverride : tankdefs::name(cam.tank);
     GameRendering::TextBox tankBox = r.textBox(ctx, tank, 18 * ui);
     ctx.save();
@@ -1116,7 +1116,7 @@ void GameUI::renderUpgrades(cp5::Context& ctx, Game& game, double now, double ui
             UpgradeSlot slot;
             slot.tankId = ids[i];
             slot.color = teamColorHex(i & 7);
-            upgradeSlots.push_back(slot);
+            upgradeSlots.push_back(std::move(slot));
         }
     }
 
@@ -1163,7 +1163,7 @@ void GameUI::renderUpgrades(cp5::Context& ctx, Game& game, double now, double ui
         bool over = mx >= cx - box / 2 && mx <= cx + box / 2 && my >= top && my <= bottom;
         bool pressed = over && pressedButton(ACTION_UPGRADE, slot.tankId);
         drawButton(layer, cx - box * 0.5f, top, box, box, slot.color, slot.fade > 0.9f && avail, over, pressed, "", ui);
-        game.rendering.drawTankPreview(layer, slot.tankId, cx, top + box / 2, now / 3000.0, 0.4 * ui, true);
+        game.rendering.drawTankIcon(layer, slot.icon, slot.tankId, cx, top + box / 2, now / 3000.0, 0.4 * ui, true);
 
         // The name's box sits on the slot's bottom edge, unrounded.
         const std::string& name = tankdefs::name(slot.tankId);
@@ -1232,41 +1232,32 @@ int GameUI::buildTreeNode(int tankId, int sibling, int depth) {
     return index;
 }
 
-// One ring sector, spun in from -pi and grown with the fade (deeper rings lag behind).
-void GameUI::drawTreeSector(cp5::Context& ctx, Game& game, int node, double a0, double a1, int inner, int outer,
-                            uint32_t color, double radius, double iconScale, int index) {
-    float l = (float)(inner / 15.0 + -1.0) + 1.0f;
-    ctx.save();
-    ctx.scaleAlpha(std::pow((double)treeFade, (double)l * 0.3));
-    float p = std::pow(treeFade, l);
-    float r = p * (float)radius;
-    float spin = (float)((1.0f - p) * -3.141593);
-    float start = spin + (float)a0, end = spin + (float)a1;
-    float innerR = (float)inner / 60.0f * r, outerR = (float)outer / 60.0f * r;
-    ctx.beginPath();
-    ctx.arc(0, 0, innerR, start, end, false);
-    ctx.lineTo(outerR * std::cos(end), outerR * std::sin(end));
-    ctx.arc(0, 0, outerR, end, start, true);
-    ctx.closePath();
-    ctx.setFillColor(color);
-    ctx.fill();
-    double w = cp5::canvasWidth(), h = cp5::canvasHeight();
-    ctx.setLineWidth(p * config::uiScale * std::max(w / 1920.0, h / 1080.0) * 5.0);
+// The ring's sectors at full size and no spin, around the middle of its canvas.
+void GameUI::drawTreeRing(TreeRing& ring, double radius, double lineWidth) {
+    int outer = 0;
+    for (const TreeSector& s : ring.sectors) outer = std::max(outer, s.outer);
+    int half = (int)std::ceil(outer / 60.0 * radius + lineWidth / 2) + 2;
+    if (!ring.canvas) ring.canvas = std::make_unique<cp5::Context>(true);
+    cp5::Context& ctx = *ring.canvas;
+    ctx.setSize(2 * half, 2 * half);
+    ctx.clear();
+    ctx.translate(half, half);
+    ctx.setLineWidth(lineWidth);
     ctx.setLineJoin(cp5::LineJoin::round);
     ctx.setStrokeColor(0x555555);
-    ctx.stroke();
-    if (node >= 0) {
-        TreeNode& n = treeNodes[node];
-        float mid = (start + end) * 0.5f, midR = (innerR + outerR) * 0.5f;
-        ctx.translate(midR * std::cos(mid), midR * std::sin(mid));
-        ctx.rotate(mid);
-        ctx.scale(p, p);
-        // The icon cache only re-renders every 15th frame after the size changes.
-        if (n.iconScale != iconScale) { n.iconScale = iconScale; n.iconReady = false; }
-        if (!n.iconReady && (treeFrame + index) % 15 == 0) n.iconReady = true;
-        if (n.iconReady) game.rendering.drawTankPreview(ctx, n.tankId, 0, 0, 0, iconScale, true);
+    float r = (float)radius;
+    for (const TreeSector& s : ring.sectors) {
+        float start = (float)s.start, end = (float)s.end;
+        float innerR = (float)s.inner / 60.0f * r, outerR = (float)s.outer / 60.0f * r;
+        ctx.beginPath();
+        ctx.arc(0, 0, innerR, start, end, false);
+        ctx.lineTo(outerR * std::cos(end), outerR * std::sin(end));
+        ctx.arc(0, 0, outerR, end, start, true);
+        ctx.closePath();
+        ctx.setFillColor(s.node < 0 ? 0x555555 : pastel(teamColorHex(treeNodes[s.node].sibling)));
+        ctx.fill();
+        ctx.stroke();
     }
-    ctx.restore();
 }
 
 void GameUI::renderClassTree(cp5::Context& ctx, Game& game, double now, bool hasPlayer) {
@@ -1277,7 +1268,11 @@ void GameUI::renderClassTree(cp5::Context& ctx, Game& game, double now, bool has
         if (treeFade > 0.99f) treeFade = 0.99f;
         treeFade = (float)std::pow((double)treeFade, 1.25);
     }
-    if (treeFade < 0.01f) return;
+    if (treeFade < 0.01f) {
+        // A hidden tree gives its ring canvases back.
+        for (TreeRing& ring : treeRings) ring.canvas.reset();
+        return;
+    }
 
     if (!treeBuilt) {
         if (tankdefs::count() == 0) return;
@@ -1304,9 +1299,33 @@ void GameUI::renderClassTree(cp5::Context& ctx, Game& game, double now, bool has
             post.push_back(i);
         };
         walk(walk, 0);
-        treeOrder = post;
-        std::stable_sort(treeOrder.begin(), treeOrder.end(),
+        std::stable_sort(post.begin(), post.end(),
                          [&](int a, int b) { return treeNodes[a].level > treeNodes[b].level; });
+        // Each node adds a connector to every child past its nearest children's level, then its
+        // own sector out to that level.
+        treeRings.clear();
+        int index = 0;
+        auto add = [&](const TreeSector& s) {
+            auto ring = std::find_if(treeRings.begin(), treeRings.end(), [&](const TreeRing& r) { return r.inner == s.inner; });
+            if (ring == treeRings.end()) {
+                treeRings.emplace_back();
+                ring = treeRings.end() - 1;
+                ring->inner = s.inner;
+            }
+            ring->sectors.push_back(s);
+        };
+        for (int i : post) {
+            const TreeNode& n = treeNodes[i];
+            int outer = 60;
+            for (int c : n.children) outer = std::min(outer, treeNodes[c].level);
+            for (int c : n.children) {
+                const TreeNode& child = treeNodes[c];
+                if (child.level > outer) add({-1, child.start, child.end, outer, child.level, index++});
+            }
+            if (n.level != 0) add({i, n.start, n.end, n.level, outer, index++});
+        }
+        std::stable_sort(treeRings.begin(), treeRings.end(),
+                         [](const TreeRing& a, const TreeRing& b) { return a.inner > b.inner; });
         treeFrame = 0;
     }
     ++treeFrame;
@@ -1315,22 +1334,35 @@ void GameUI::renderClassTree(cp5::Context& ctx, Game& game, double now, bool has
     double screen = std::max(w / 1920.0, h / 1080.0);
     double radius = config::uiScale * screen * 400.0;
     double iconScale = screen * 0.25;
-    int index = 0;
+    bool stale = radius != treeRingRadius;
+    for (int i = 0; i < 8; ++i) stale |= teamColorHex(i) != treeRingPalette[i];
+    treeRingRadius = radius;
+    for (int i = 0; i < 8; ++i) treeRingPalette[i] = teamColorHex(i);
+
     ctx.save();
     ctx.translate((double)((int)w / 2), (double)((int)h / 2));
-    for (int i : treeOrder) {
-        const TreeNode& n = treeNodes[i];
+    ctx.rotate(now / 15000.0);
+    for (TreeRing& ring : treeRings) {
+        if (stale || !ring.canvas) drawTreeRing(ring, radius, config::uiScale * screen * 5.0);
+        // Spun in from -pi and grown with the fade, deeper rings lagging behind.
+        float l = (float)(ring.inner / 15.0 + -1.0) + 1.0f;
+        float p = std::pow(treeFade, l);
         ctx.save();
-        ctx.rotate(now / 15000.0);
-        int outer = 60;
-        for (int c : n.children) outer = std::min(outer, treeNodes[c].level);
-        for (int c : n.children) {
-            const TreeNode& child = treeNodes[c];
-            if (child.level > outer)
-                drawTreeSector(ctx, game, -1, child.start, child.end, outer, child.level, 0x555555, radius, iconScale, index++);
+        ctx.scaleAlpha(std::pow((double)treeFade, (double)l * 0.3));
+        ctx.rotate((float)((1.0f - p) * -3.141593));
+        ctx.scale(p, p);
+        double half = ring.canvas->width() / 2.0;
+        ctx.drawContext(*ring.canvas, -half, -half);
+        float r = (float)radius;
+        for (const TreeSector& s : ring.sectors) {
+            if (s.node < 0) continue;
+            TreeNode& n = treeNodes[s.node];
+            float mid = ((float)s.start + (float)s.end) * 0.5f;
+            float midR = ((float)s.inner / 60.0f * r + (float)s.outer / 60.0f * r) * 0.5f;
+            // A stale icon only re-renders every 15th frame, and is hidden until then.
+            game.rendering.drawTankIcon(ctx, n.icon, n.tankId, midR * std::cos(mid), midR * std::sin(mid), mid, iconScale,
+                                        true, (treeFrame + s.index) % 15 == 0);
         }
-        if (n.level != 0)
-            drawTreeSector(ctx, game, i, n.start, n.end, n.level, outer, pastel(teamColorHex(n.sibling)), radius, iconScale, index++);
         ctx.restore();
     }
     ctx.restore();

@@ -41,6 +41,7 @@ void GameRendering::render(cp5::Context& ctx, Simulation& sim, double now) {
         fpsAverage = 1000.0 / (sum / 60.0);
     }
 
+    updatePreviewLook();
     solveCamera(sim, now);
 
     bool useGL = config::renWorldGL && worldRenderer.beginFrame(
@@ -1016,8 +1017,33 @@ namespace {
     }
 }
 
-void GameRendering::drawTankPreview(cp5::Context& ctx, int tankId, double cx, double cy, double angle, double scale,
-                                    bool centerAroundAABB) {
+void GameRendering::updatePreviewLook() {
+    PreviewLook look{colorHex(Color::Border), colorHex(Color::Barrel), config::strokeSolidColor, config::strokeIntensity,
+                     config::renStrokeSoftColor, config::renDebugCollisions, tankdefs::version()};
+    if (look == previewLook) return;
+    previewLook = look;
+    ++previewLookId;
+}
+
+void GameRendering::drawTankIcon(cp5::Context& ctx, TankIcon& icon, int tankId, double cx, double cy, double angle,
+                                 double scale, bool centerAroundAABB, bool render) {
+    if (icon.tankId != tankId || icon.scale != scale || icon.look != previewLookId) {
+        if (!render) return;
+        renderTankIcon(icon, tankId, scale);
+    }
+    cp5::Context& canvas = *icon.canvas;
+    double w = canvas.width(), h = canvas.height();
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    // The upgrade panel centers the AABB on the box, so the body sits off-center. Otherwise
+    // the tank origin lands on the anchor.
+    if (centerAroundAABB) ctx.drawContext(canvas, -w / 2, -h / 2);
+    else ctx.drawContext(canvas, icon.centerX - w / 2, icon.centerY - h / 2);
+    ctx.restore();
+}
+
+void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale) {
     std::vector<PreviewPart> parts;
     previewAddon(parts, tankdefs::preAddon(tankId));
 
@@ -1066,6 +1092,20 @@ void GameRendering::drawTankPreview(cp5::Context& ctx, int tankId, double cx, do
     double minX = 0, minY = 0, maxX = 0, maxY = 0;
     partBounds(body, minX, minY, maxX, maxY);
     for (const PreviewPart& p : parts) partBounds(p, minX, minY, maxX, maxY);
+
+    // The AABB sits in the middle of the canvas, with room for the strokes and debug boxes
+    // all around.
+    double pad = 10 + std::ceil(7.5 * scale);
+    int w = (int)std::ceil((maxX - minX) * scale + 2 * pad), h = (int)std::ceil((maxY - minY) * scale + 2 * pad);
+    if (!icon.canvas) icon.canvas = std::make_unique<cp5::Context>(true);
+    cp5::Context& ctx = *icon.canvas;
+    ctx.setSize(w, h);
+    ctx.clear();
+    icon.tankId = tankId;
+    icon.scale = scale;
+    icon.look = previewLookId;
+    icon.centerX = (minX + maxX) / 2 * scale;
+    icon.centerY = (minY + maxY) / 2 * scale;
 
     double bwOuter = 7.5 * scale;
     auto drawPart = [&](const PreviewPart& p) {
@@ -1126,10 +1166,7 @@ void GameRendering::drawTankPreview(cp5::Context& ctx, int tankId, double cx, do
     };
 
     ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(angle);
-    // The upgrade panel centers the AABB on the box, so the body sits off-center.
-    if (centerAroundAABB) ctx.translate(-(minX + maxX) / 2 * scale, -(minY + maxY) / 2 * scale);
+    ctx.translate(w / 2.0 - icon.centerX, h / 2.0 - icon.centerY);
 
     for (const PreviewPart& p : parts) if (!p.aboveBody) drawPart(p);
     drawPart(body);
@@ -1208,7 +1245,8 @@ void GameRendering::renderHUD(cp5::Context& ctx, Simulation& sim, double now, do
             if (arenaData->scoreboardTanks[i] >= 0) {
                 // Icon rides the unclamped fill end; the leader's icon is flipped 180deg.
                 float ix = colX + inner * perc - inner * 0.5f;
-                drawTankPreview(ctx, arenaData->scoreboardTanks[i], ix, y, i == 0 ? M_PI : 0, (double)uiUnits(1) * 0.13);
+                drawTankIcon(ctx, scoreboardIcons[i], arenaData->scoreboardTanks[i], ix, y, i == 0 ? M_PI : 0,
+                             (double)uiUnits(1) * 0.13);
             }
             // The row is separate rasters side by side, so the score counts up with the bar.
             std::string segs[4];
