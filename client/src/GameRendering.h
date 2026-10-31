@@ -47,6 +47,8 @@ public:
         int tankId = -1;
         double scale = 0;
         int look = -1;
+        // The drawn part, from the canvas' top left.
+        int w = 0, h = 0;
         // The AABB center from the tank origin, in pixels.
         double centerX = 0, centerY = 0;
     };

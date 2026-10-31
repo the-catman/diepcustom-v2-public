@@ -1031,15 +1031,15 @@ void GameRendering::drawTankIcon(cp5::Context& ctx, TankIcon& icon, int tankId, 
         if (!render) return;
         renderTankIcon(icon, tankId, scale);
     }
-    cp5::Context& canvas = *icon.canvas;
-    double w = canvas.width(), h = canvas.height();
+    double w = icon.w, h = icon.h;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(angle);
     // The upgrade panel centers the AABB on the box, so the body sits off-center. Otherwise
     // the tank origin lands on the anchor.
-    if (centerAroundAABB) ctx.drawContext(canvas, -w / 2, -h / 2);
-    else ctx.drawContext(canvas, icon.centerX - w / 2, icon.centerY - h / 2);
+    double x = centerAroundAABB ? -w / 2 : icon.centerX - w / 2;
+    double y = centerAroundAABB ? -h / 2 : icon.centerY - h / 2;
+    ctx.drawContext(*icon.canvas, 0, 0, w, h, x, y, w, h);
     ctx.restore();
 }
 
@@ -1099,8 +1099,12 @@ void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale) {
     int w = (int)std::ceil((maxX - minX) * scale + 2 * pad), h = (int)std::ceil((maxY - minY) * scale + 2 * pad);
     if (!icon.canvas) icon.canvas = std::make_unique<cp5::Context>(true);
     cp5::Context& ctx = *icon.canvas;
-    ctx.setSize(w, h);
+    // Firefox only accelerates canvases of at least 128x128, and drawing smaller ones into
+    // accelerated ones every frame can get those moved to software.
+    ctx.setSize(std::max(w, 128), std::max(h, 128));
     ctx.clear();
+    icon.w = w;
+    icon.h = h;
     icon.tankId = tankId;
     icon.scale = scale;
     icon.look = previewLookId;
