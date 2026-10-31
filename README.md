@@ -5,9 +5,9 @@ A from-scratch C++ reimplementation of both the diep.io game server and client.
 ## Timeline
 
 - **2020:** diep.io ships the WASM client build (`6f59094d`) that everything downstream references.
-- **~2021:** [diepcustom](https://github.com/abcxff/diepcustom) begins as a TypeScript server built to work with the original WASM client.
+- **~2022:** [diepcustom](https://github.com/abcxff/diepcustom) begins as a TypeScript server built to work with the original WASM client.
 - **~2024:** diepcustom development winds down.
-- **This fork** I rewrote the entire TS server in C++ (`server/`), then built a new client from scratch in C++/Emscripten (`client/`) drawing with WebGL2 and Canvas2D, replacing the original WASM binary entirely. Both speak the old diep protocol.
+- **This fork:** I rewrote the entire TS server in C++ (`server/`), then built a new client from scratch in C++/Emscripten (`client/`) drawing with WebGL2 and Canvas2D, replacing the original WASM binary entirely. Both speak the old diep protocol.
 
 ## Building
 
