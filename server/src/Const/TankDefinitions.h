@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 constexpr double visibilityRateDamage = 0.2;
 
