@@ -917,7 +917,7 @@ void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale) {
     // Polygon bodies use a smaller base size (sides 4 -> sqrt2*32.5, sides 16 -> sqrt2*25).
     int bodySides = tankdefs::bodySides(tankId);
     double bodySize = bodySides == 4 ? M_SQRT2 * 32.5 : bodySides == 16 ? M_SQRT2 * 25 : 50;
-    PreviewPart body{bodySides, 0, 0, 0, bodySize, 0, false, 0x00b2e1, false};
+    PreviewPart body{bodySides, 0, 0, 0, bodySize, 0, false, colorHex(Color::Tank), false};
 
     // AABB: body rect union polygon rects and rotated barrel corners, strokes excluded.
     auto partBounds = [](const PreviewPart& p, double& minX, double& minY, double& maxX, double& maxY) {
