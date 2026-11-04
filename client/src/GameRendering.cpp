@@ -852,10 +852,10 @@ namespace {
         } else if (id == "dompronounced") {
             parts.push_back({2, 50, 0, M_PI, 22, 35, true, barrel, false});
         } else if (id == "autoturret") {
-            previewAutoTurret(parts, 0, 0, 0, true);
+            previewAutoTurret(parts, 0, 0, M_PI, true);
         } else if (id == "autosmasher") {
             previewGuard(parts, 6, 1.15, 0);
-            previewAutoTurret(parts, 0, 0, 0, true);
+            previewAutoTurret(parts, 0, 0, M_PI, true);
         } else if (id == "auto2" || id == "auto3" || id == "auto5" || id == "auto7") {
             int n = id == "auto2" ? 2 : id == "auto3" ? 3 : id == "auto7" ? 7 : 5;
             for (int i = 0; i < n; ++i) {
