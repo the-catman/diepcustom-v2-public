@@ -713,7 +713,7 @@ void GameRendering::renderNames(cp5::Context& ctx, Simulation& sim, double now) 
         ctx.save();
         ctx.setAlpha(alpha);
         uint32_t fill = (e.name->flags & NameFlags::highlightedName) ? 0xffff90 : 0xf5f5f5;
-        if (e.score && !hiddenScores) {
+        if (e.score && e.score->score.target > 0 && !hiddenScores) {
             std::string s = formatScore(e.score->score.getSmooth(now));
             drawLabel(ctx, s, x, yTop, 25 * textScale, fill, true, 0x555555);
             ctx.setFontSize(25 * textScale);
