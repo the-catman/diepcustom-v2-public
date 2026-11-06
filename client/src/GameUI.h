@@ -29,6 +29,7 @@ public:
     void toggleConsole();
 
     void addNotification(const std::string& text, uint32_t color, double timeMs, const std::string& id, double now);
+    void clearNotifications();
     void onNewConnection();
     // A text field is up (the DOM input owns typing and its default key actions).
     bool typing() const { return config::renUi && (spawnAlpha > 0.7 || consoleOpen); }

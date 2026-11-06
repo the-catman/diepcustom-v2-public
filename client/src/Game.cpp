@@ -284,15 +284,20 @@ void Game::onClose() {
     std::printf("connection closed\n");
     accepted = false;
     spawnedThisConnection = false;
-    simulation = Simulation{};
-    autoFire = false;
-    autoSpin = false;
+    reset();
     playersOnline = -1;
     pongReceived = true;
     pingSamples.clear();
     // No page reload once the backoff gets long, so it just keeps growing.
     reconnectCountdown = reconnectBackoff;
     reconnectBackoff = reconnectBackoff * 2 + 20;
+}
+
+void Game::reset() {
+    simulation = Simulation{};
+    autoFire = false;
+    autoSpin = false;
+    ui.clearNotifications();
 }
 
 void Game::onData(const uint8_t* data, size_t len) {
@@ -323,6 +328,7 @@ void Game::onData(const uint8_t* data, size_t len) {
             return;
         case ClientBound::Accept: {
             accepted = true;
+            reset();
             int level = r.vi();
             commandLevel = std::max(commandLevel, level);
             std::printf("accepted, access level %d\n", level);

@@ -788,6 +788,14 @@ void GameUI::addNotification(const std::string& text, uint32_t color, double tim
     notifications.push_back(n);
 }
 
+void GameUI::clearNotifications() {
+    double now = emscripten_get_now();
+
+    for (Notification& n : notifications) {
+        n.expiry = now + 300; // So animation would display
+    }
+}
+
 void GameUI::renderNotifications(cp5::Context& ctx, Game& game, double now, double ui) {
     // The text grows with the fade, and the background is its raster box + 10u.
     auto unit = GameRendering::uiUnits;

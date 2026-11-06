@@ -713,7 +713,7 @@ void GameRendering::renderNames(cp5::Context& ctx, Simulation& sim, double now) 
         ctx.save();
         ctx.setAlpha(alpha);
         uint32_t fill = (e.name->flags & NameFlags::highlightedName) ? 0xffff90 : 0xf5f5f5;
-        if (e.score && !hiddenScores) {
+        if (e.score && e.score->score.target > 0 && !hiddenScores) {
             std::string s = formatScore(e.score->score.getSmooth(now));
             drawLabel(ctx, s, x, yTop, 25 * textScale, fill, true, 0x555555);
             ctx.setFontSize(25 * textScale);
@@ -852,10 +852,10 @@ namespace {
         } else if (id == "dompronounced") {
             parts.push_back({2, 50, 0, M_PI, 22, 35, true, barrel, false});
         } else if (id == "autoturret") {
-            previewAutoTurret(parts, 0, 0, 0, true);
+            previewAutoTurret(parts, 0, 0, M_PI, true);
         } else if (id == "autosmasher") {
             previewGuard(parts, 6, 1.15, 0);
-            previewAutoTurret(parts, 0, 0, 0, true);
+            previewAutoTurret(parts, 0, 0, M_PI, true);
         } else if (id == "auto2" || id == "auto3" || id == "auto5" || id == "auto7") {
             int n = id == "auto2" ? 2 : id == "auto3" ? 3 : id == "auto7" ? 7 : 5;
             for (int i = 0; i < n; ++i) {
@@ -917,7 +917,7 @@ void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale) {
     // Polygon bodies use a smaller base size (sides 4 -> sqrt2*32.5, sides 16 -> sqrt2*25).
     int bodySides = tankdefs::bodySides(tankId);
     double bodySize = bodySides == 4 ? M_SQRT2 * 32.5 : bodySides == 16 ? M_SQRT2 * 25 : 50;
-    PreviewPart body{bodySides, 0, 0, 0, bodySize, 0, false, 0x00b2e1, false};
+    PreviewPart body{bodySides, 0, 0, 0, bodySize, 0, false, colorHex(Color::Tank), false};
 
     // AABB: body rect union polygon rects and rotated barrel corners, strokes excluded.
     auto partBounds = [](const PreviewPart& p, double& minX, double& minY, double& maxX, double& maxY) {
