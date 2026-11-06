@@ -120,6 +120,7 @@ private:
 
     void onOpen();
     void onClose();
+    void reset();
     void onData(const uint8_t* data, size_t len);
     void setKey(int key, bool down);
     bool firing() const;
