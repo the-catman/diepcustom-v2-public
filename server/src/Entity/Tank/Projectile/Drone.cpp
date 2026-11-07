@@ -96,6 +96,9 @@ void Drone::tick(int tick) {
 
         tickMixin(tick);
 
+        if (restFacesVelocity && velocity.x * velocity.x + velocity.y * velocity.y > 0.01)
+            positionData.setAngle(std::atan2(velocity.y, velocity.x));
+
         baseAccel = base;
         return;
     } else {

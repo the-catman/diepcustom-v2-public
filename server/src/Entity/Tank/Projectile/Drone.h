@@ -17,5 +17,6 @@ protected:
     virtual void restingBehavior(BarrelBase* owner);
     bool canControlDrones = false;
     bool restReturning = false;
+    bool restFacesVelocity = true;
     int restingAccelDivisor = 6;
 };

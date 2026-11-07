@@ -13,6 +13,7 @@ Swarm::Swarm(Barrel* barrel, BarrelBase* tank, TankDefinition* tankDefinition, d
     ai->targetFilter = [](const VectorAbstract&) { return true; };
     physicsData.setFlags(physicsData.flags | PhysicsFlags::canEscapeArena | PhysicsFlags::noOwnTeamCollision);
     physicsData.setPushFactor(1.2);
+    restFacesVelocity = false;
 
     if (barrel->definition->bullet.lifeLength != -1) {
         lifeLength = 88 * barrel->definition->bullet.lifeLength;
