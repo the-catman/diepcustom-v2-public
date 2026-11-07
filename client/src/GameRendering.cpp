@@ -712,9 +712,10 @@ void GameRendering::renderNames(cp5::Context& ctx, Simulation& sim, double now) 
         double textScale = size / 50.0;
         ctx.save();
         ctx.setAlpha(alpha);
-        uint32_t fill = (e.name->flags & NameFlags::highlightedName) ? 0xffff90 : 0xf5f5f5;
-        if (e.score && e.score->score.target > 0 && !hiddenScores) {
-            std::string s = formatScore(e.score->score.getSmooth(now));
+        uint32_t fill = (e.name->flags & NameFlags::highlightedName) ? 0xffff90 : 0xffffff;
+        float shown = e.score ? e.score->score.getSmooth(now) : 0;
+        if (shown > 0 && !hiddenScores) {
+            std::string s = formatScore(shown);
             drawLabel(ctx, s, x, yTop, 25 * textScale, fill, true, 0x555555);
             ctx.setFontSize(25 * textScale);
             ctx.setLineWidth(25 * textScale * 0.2);
@@ -867,8 +868,9 @@ namespace {
 }
 
 void GameRendering::updatePreviewLook() {
-    PreviewLook look{colorHex(Color::Border), colorHex(Color::Barrel), config::strokeSolidColor, config::strokeIntensity,
-                     config::renStrokeSoftColor, config::renDebugCollisions, tankdefs::version()};
+    PreviewLook look{colorHex(Color::Border), colorHex(Color::Barrel), colorHex(Color::Tank), config::strokeSolidColor,
+                     config::strokeIntensity, config::renStrokeSoftColor, config::renDebugCollisions,
+                     tankdefs::version()};
     if (look == previewLook) return;
     previewLook = look;
     ++previewLookId;

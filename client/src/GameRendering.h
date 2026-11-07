@@ -93,12 +93,12 @@ private:
     // Everything a preview's pixels depend on besides the tank and scale. previewLookId
     // counts its changes; icons drawn under an older one redraw.
     struct PreviewLook {
-        uint32_t border = 0, barrel = 0, solidStroke = 0;
+        uint32_t border = 0, barrel = 0, tank = 0, solidStroke = 0;
         double strokeIntensity = 0;
         bool softStroke = false, debugCollisions = false;
         int tankDefs = -1;
         bool operator==(const PreviewLook& o) const {
-            return border == o.border && barrel == o.barrel && solidStroke == o.solidStroke &&
+            return border == o.border && barrel == o.barrel && tank == o.tank && solidStroke == o.solidStroke &&
                    strokeIntensity == o.strokeIntensity && softStroke == o.softStroke &&
                    debugCollisions == o.debugCollisions && tankDefs == o.tankDefs;
         }
