@@ -1,12 +1,14 @@
 #include "Config.h"
 #include "Const/Enums.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 namespace config {
     const std::string buildHash = "6f59094d60f98fafc14371671d3ff31ef4d75d9e";
 
     int serverPort = 8080;
+    int trustProxy = 0;
     std::string host = "unknown";
     std::string mode = "development";
 
@@ -34,6 +36,7 @@ namespace config {
 
     void init() {
         if (const char* p = std::getenv("PORT")) serverPort = std::atoi(p);
+        if (const char* t = std::getenv("TRUST_PROXY")) trustProxy = std::max(0, std::atoi(t));
         if (const char* h = std::getenv("SERVER_INFO")) host = h;
         if (const char* m = std::getenv("NODE_ENV")) mode = m;
         if (const char* d = std::getenv("DEV_PASSWORD_HASH")) devPasswordHash = d;

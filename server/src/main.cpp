@@ -1,5 +1,6 @@
 #include "App.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -54,6 +55,23 @@ static std::string readFile(const std::string& path) {
     return ss.str();
 }
 
+// The peer and the X-Forwarded-For entries form a chain; skip the trusted proxies from its end.
+static std::string clientAddress(std::string_view peer, std::string_view forwarded) {
+    std::vector<std::string_view> chain;
+    while (!forwarded.empty()) {
+        size_t comma = forwarded.find(',');
+        std::string_view hop = forwarded.substr(0, comma);
+        while (!hop.empty() && (hop.front() == ' ' || hop.front() == '\t')) hop.remove_prefix(1);
+        while (!hop.empty() && (hop.back() == ' ' || hop.back() == '\t')) hop.remove_suffix(1);
+        if (!hop.empty()) chain.push_back(hop);
+        if (comma == std::string_view::npos) break;
+        forwarded.remove_prefix(comma + 1);
+    }
+    chain.push_back(peer);
+    size_t skip = std::min((size_t)config::trustProxy, chain.size() - 1);
+    return std::string(chain[chain.size() - 1 - skip]);
+}
+
 static std::string mimeFor(const std::string& path) {
     auto ends = [&](const char* e) { size_t n = std::strlen(e); return path.size() >= n && path.compare(path.size() - n, n, e) == 0; };
     if (ends(".html")) return "text/html; charset=utf-8";
@@ -105,13 +123,14 @@ int main() {
         .upgrade = [](auto* res, auto* req, auto* context) {
             PerSocketData data;
             data.gamemode = std::string(req->getUrl().substr(1));
+            data.ipAddress = clientAddress(res->getRemoteAddressAsText(), req->getHeader("x-forwarded-for"));
             res->template upgrade<PerSocketData>(std::move(data),
                 req->getHeader("sec-websocket-key"), req->getHeader("sec-websocket-protocol"),
                 req->getHeader("sec-websocket-extensions"), context);
         },
         .open = [](auto* ws) {
             PerSocketData* sd = ws->getUserData();
-            std::string ip = std::string(ws->getRemoteAddressAsText());
+            std::string ip = sd->ipAddress;
 
             int conns = connections.count(ip) ? connections[ip] : 0;
             if (conns >= config::connectionsPerIp || bannedClients.count(ip)) { ws->close(); return; }
@@ -135,7 +154,6 @@ int main() {
             };
             client->closeWs = [ws]() { ws->close(); };
             sd->client = client;
-            sd->ipAddress = ip;
         },
         .message = [](auto* ws, std::string_view message, uWS::OpCode opCode) {
             PerSocketData* sd = ws->getUserData();

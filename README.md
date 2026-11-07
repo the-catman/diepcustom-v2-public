@@ -40,6 +40,16 @@ Environment variables:
 - `PORT`: the port to listen on (8080 by default).
 - `DEV_PASSWORD_HASH`: sha256 hex of a dev password. Enter `util_set_dev_password <password>` in the console (Home) and reconnect to get full access. Without it nobody has dev access.
 - `SERVER_INFO`: the host name shown next to your ping.
+- `TRUST_PROXY`: how many reverse proxies sit in front of the server (0 by default). Each one adds the address it saw to `X-Forwarded-For`, and the server takes the player's IP from there. Keep it at 0 when players connect directly, or they could pick their own IP.
+
+## Docker
+
+```
+docker compose up -d --build
+```
+This builds the client and server into one image and runs it behind [Caddy](https://caddyserver.com), which handles HTTPS. By default it serves https://localhost with Caddy's own certificate. Set `SITE_ADDRESS` to your domain to get a real one (ports 80 and 443 need to be reachable). `HTTP_PORT` and `HTTPS_PORT` change the published ports, and `DEV_PASSWORD_HASH` is passed through. All of these can go in a `.env` file next to `compose.yaml`.
+
+The game container holds only the static server binary, its data and the client. It runs as a non-root user with no capabilities on a read-only filesystem, and isn't published itself: players reach it through Caddy.
 
 ## Layout
 

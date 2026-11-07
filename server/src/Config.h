@@ -7,6 +7,8 @@ namespace config {
     extern const std::string buildHash;
 
     extern int serverPort;
+    // Reverse proxies in front of the server; each appends the address it saw to X-Forwarded-For.
+    extern int trustProxy;
     extern std::string host;
     extern std::string mode;
 

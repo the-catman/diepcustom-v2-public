@@ -1,0 +1,8 @@
+*
+!client/CMakeLists.txt
+!client/src
+!client/web
+!server/CMakeLists.txt
+!server/data
+!server/src
+!server/third_party/nlohmann
