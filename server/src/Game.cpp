@@ -70,12 +70,37 @@ void GameServer::end() {
     tick = 0;
     timeouts.clear();
     entities->clear();
+    arena = nullptr;
     running = false;
     onEnd();
 }
 
+static GameServer* waitingGame(const std::string& gamemode, GameServer* except) {
+    GameServer* best = nullptr;
+    for (GameServer* g : GameServer::instances) {
+        if (g == except || !g->lobbies || g->gamemode != gamemode || !g->running || !g->arena) continue;
+        if (!g->arena->isCountingDown()) continue;
+        if (!best || g->clients.size() > best->clients.size()) best = g;
+    }
+    return best;
+}
+
+GameServer* GameServer::lobby(ArenaFactory factory, const std::string& gamemode, const std::string& name,
+                              const std::string& id) {
+    if (GameServer* waiting = waitingGame(gamemode, nullptr)) return waiting;
+    GameServer* game = new GameServer(std::move(factory), gamemode, name);
+    game->id = id;
+    game->lobbies = true;
+    instances.push_back(game);
+    return game;
+}
+
+// An emptied instance is freed by the main loop.
 void GameServer::onEnd() {
-    start();
+    GameServer* waiting = lobbies ? waitingGame(gamemode, this) : nullptr;
+    if (!waiting) return start();
+    std::vector<Client*> moving(clients.begin(), clients.end());
+    for (Client* client : moving) client->moveTo(waiting);
 }
 
 void GameServer::start() {
@@ -114,6 +139,8 @@ void GameServer::tickLoop() {
                 ++i;
             }
         }
+        // Ended without restarting: its players went to another game.
+        if (!running) return;
 
         entities->preTick(tick);
         // Snapshot: a client's tick may terminate it, erasing from clients mid-iteration.

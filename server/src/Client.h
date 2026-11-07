@@ -63,6 +63,8 @@ public:
 
     WSWriterStream write() { return WSWriterStream(this); }
     void acceptClient();
+    // Moves an accepted client into another game, which takes it in like a new connection.
+    void moveTo(GameServer* target);
     void send(const uint8_t* data, size_t len);
     void onClose();
     void terminate();

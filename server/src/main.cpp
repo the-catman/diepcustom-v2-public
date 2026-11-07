@@ -38,10 +38,13 @@ struct PerSocketData {
 static std::unordered_map<std::string, int> connections;
 
 // The listed modes, in /api/servers order. A private mode (sandbox) gives each connection a
-// fresh instance instead of one shared game; a party code at Init moves it into another.
+// fresh instance instead of one shared game; a party code at Init moves it into another. A
+// lobby mode (survival) puts each connection in its game still waiting to start.
+enum class Instancing { Shared, Private, Lobbies };
 struct Mode {
     std::string id, gamemode, name;
     ArenaFactory factory;
+    Instancing instancing = Instancing::Shared;
     GameServer* shared = nullptr;
 };
 static std::vector<Mode> modes;
@@ -93,23 +96,26 @@ int main() {
     const int PORT = config::serverPort;
 
     // Server ids count up from "aaaa" in list order.
-    auto add = [](const char* gamemode, const char* name, ArenaFactory factory, bool isPrivate = false) {
-        Mode m{std::string(4, 'a'), gamemode, name, std::move(factory)};
+    auto add = [](const char* gamemode, const char* name, ArenaFactory factory,
+                  Instancing instancing = Instancing::Shared) {
+        Mode m{std::string(4, 'a'), gamemode, name, std::move(factory), instancing};
         for (size_t i = 3, n = modes.size(); n; --i, n /= 26) m.id[i] = (char)('a' + n % 26);
-        if (!isPrivate) {
+        if (instancing == Instancing::Shared) {
             m.shared = new GameServer(m.factory, m.gamemode, m.name);
             m.shared->id = m.id;
         }
         modes.push_back(std::move(m));
     };
     add("ffa", "FFA", [](GameServer* g) { return (ArenaEntity*)new FFAArena(g); });
-    add("survival", "Survival", [](GameServer* g) { return (ArenaEntity*)new SurvivalArena(g); });
+    add("survival", "Survival", [](GameServer* g) { return (ArenaEntity*)new SurvivalArena(g); },
+        Instancing::Lobbies);
     add("teams", "2 Teams", [](GameServer* g) { return (ArenaEntity*)new Teams2Arena(g); });
     add("4teams", "4 Teams", [](GameServer* g) { return (ArenaEntity*)new Teams4Arena(g); });
     add("dom", "Domination", [](GameServer* g) { return (ArenaEntity*)new DominationArena(g); });
     add("tag", "Tag", [](GameServer* g) { return (ArenaEntity*)new TagArena(g); });
     add("maze", "Maze", [](GameServer* g) { return (ArenaEntity*)new MazeArena(g); });
-    add("sandbox", "Sandbox", [](GameServer* g) { return (ArenaEntity*)new SandboxArena(g); }, true);
+    add("sandbox", "Sandbox", [](GameServer* g) { return (ArenaEntity*)new SandboxArena(g); },
+        Instancing::Private);
     add("mot", "Mothership", [](GameServer* g) { return (ArenaEntity*)new MothershipArena(g); });
 
     uWS::App app;
@@ -139,7 +145,9 @@ int main() {
             for (Mode& m : modes) if (m.gamemode == sd->gamemode) { mode = &m; break; }
             if (!mode) { ws->close(); return; }
             GameServer* game = mode->shared;
-            if (!game) {
+            if (mode->instancing == Instancing::Lobbies) {
+                game = GameServer::lobby(mode->factory, mode->gamemode, mode->name, mode->id);
+            } else if (!game) {
                 game = new GameServer(mode->factory, mode->gamemode, mode->name);
                 game->id = mode->id;
                 for (int i = 0; i < 8; ++i) game->partyCode += (char)(int)(util::randomFloat() * 256);
@@ -243,7 +251,7 @@ int main() {
             if (m.shared->clients.size()) m.shared->tickLoop();
             else m.shared->flushDeadClients(); // last client left; nobody ticks to free it otherwise
         }
-        // A private instance goes as soon as it empties.
+        // An instance goes as soon as it empties.
         auto& instances = GameServer::instances;
         for (size_t i = 0; i < instances.size();) {
             GameServer* g = instances[i];

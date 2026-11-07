@@ -9,7 +9,7 @@
 
 #include <cmath>
 
-static constexpr int MIN_PLAYERS = 4;
+static constexpr int MIN_PLAYERS = 10;
 static constexpr double SCORE_PER_TICK = 0.2;
 
 int SurvivalShapeManager::wantedShapes() const {
@@ -73,7 +73,7 @@ void SurvivalArena::manageCountdown() {
 void SurvivalArena::onGameStarted() {
     ArenaEntity::onGameStarted();
     setSurvivalArenaSize((int)game->clientsAwaitingSpawn.size());
-    arenaData.setFlags(arenaData.flags | ArenaFlags::noJoining);
+    if (!game->lobbies) arenaData.setFlags(arenaData.flags | ArenaFlags::noJoining);
 }
 
 void SurvivalArena::tick(int tick) {

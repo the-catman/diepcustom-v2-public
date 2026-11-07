@@ -51,6 +51,10 @@ public:
     std::string id;
     // Set on a private instance (sandbox): the party code that joins it.
     std::string partyCode;
+    // Set on the games of a lobby mode (survival). Newcomers join the one still waiting to start,
+    // and players who want to spawn in a game that has started move there, as do a finished
+    // game's players.
+    bool lobbies = false;
     bool playersOnMap = false;
     ClientSet clients;
     std::vector<std::pair<Client*, std::string>> clientsAwaitingSpawn; // insertion-ordered
@@ -63,10 +67,15 @@ public:
     GameServer(ArenaFactory arenaFactory, const std::string& gamemode, const std::string& name);
     ~GameServer();
 
-    // Every running game, and the private instances among them: one per link-less sandbox
-    // join, dropped once empty.
+    // Every running game, and the instances among them (sandboxes, and the games of lobby
+    // modes), dropped once empty.
     static std::vector<GameServer*> games;
     static std::vector<GameServer*> instances;
+
+    // The game of a lobby mode that is still waiting to start, made when there is none.
+    static GameServer* lobby(ArenaFactory factory, const std::string& gamemode, const std::string& name,
+                             const std::string& id);
+    GameServer* lobby() { return lobby(arenaFactory, gamemode, name, id); }
 
     WSSWriterStream broadcast() { return WSSWriterStream(this); }
     // The player count is global, so every game hears each change.

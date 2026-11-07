@@ -62,6 +62,18 @@ void Client::switchGame(GameServer* target) {
     lastPingTick = connectTick = target->tick;
 }
 
+void Client::moveTo(GameServer* target) {
+    if (game->arena) game->arena->onClientRemoved(this);
+    if (Entity::exists(camera)) camera->delete_();
+    camera = nullptr;
+    inputs->deleted = true;
+    inputs->movement.setMagnitude(0);
+    inputs->client = nullptr;
+    inputs = std::make_shared<ClientInputs>(this);
+    switchGame(target);
+    acceptClient();
+}
+
 // Init's party field: two hex digits per byte, low nibble first.
 static std::string decodePartyHex(const std::string& hex) {
     auto nibble = [](char c) -> int {
@@ -276,8 +288,12 @@ void Client::parsePacket(int header, const std::vector<uint8_t>& data) {
             return;
         }
         case ServerBound::Spawn: {
-            if (game->arena->arenaData.flags & ArenaFlags::noJoining) return;
             if (Entity::exists(camera->cameraData.player)) return;
+            if (game->lobbies) {
+                if (!game->arena->isCountingDown()) moveTo(game->lobby());
+            } else if (game->arena->arenaData.flags & ArenaFlags::noJoining) {
+                return;
+            }
 
             std::string name = util::truncateUtf8(util::trim(r.stringNT()), 16);
             auto& q = game->clientsAwaitingSpawn;

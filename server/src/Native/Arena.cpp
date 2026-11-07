@@ -224,7 +224,8 @@ void ArenaEntity::close() {
     for (Client* client : game->clients) client->notify("Arena closed: No players can join", 0xff0000, -1);
 
     state = ArenaState::CLOSING;
-    arenaData.setFlags(arenaData.flags | ArenaFlags::noJoining);
+    // A lobby mode's players can still spawn: that moves them to the next game.
+    if (!game->lobbies) arenaData.setFlags(arenaData.flags | ArenaFlags::noJoining);
 
     int acCount = (int)std::floor(std::sqrt(width) / 10);
     double radius = width * 0.7071067811865476 + 5000;
