@@ -97,7 +97,7 @@ int main() {
     uWS::App app;
 
     app.ws<PerSocketData>("/*", {
-        .compression = uWS::SHARED_COMPRESSOR,
+        .compression = uWS::DISABLED,
         .maxPayloadLength = config::wssMaxMessageSize,
         .idleTimeout = 10,
         .maxBackpressure = 1024 * 1024,
@@ -131,7 +131,7 @@ int main() {
             Client* client = new Client(game);
             client->ipAddress = ip;
             client->sendRaw = [ws](const uint8_t* d, size_t n) {
-                ws->send(std::string_view((const char*)d, n), uWS::OpCode::BINARY, true);
+                ws->send(std::string_view((const char*)d, n), uWS::OpCode::BINARY);
             };
             client->closeWs = [ws]() { ws->close(); };
             sd->client = client;
