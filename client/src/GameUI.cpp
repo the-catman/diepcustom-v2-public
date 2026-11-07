@@ -792,7 +792,7 @@ void GameUI::clearNotifications() {
     double now = emscripten_get_now();
 
     for (Notification& n : notifications) {
-        n.expiry = now + 300; // So animation would display
+        if (n.expiry == 0 || n.expiry > now + 300) n.expiry = now + 300;
     }
 }
 
