@@ -61,7 +61,7 @@ bool ObjectEntity::isColliding(ObjectEntity* objA, ObjectEntity* objB) {
         }
     }
 
-    if (rb.team == (Entity*)objB->game->arena && (pa.flags & PhysicsFlags::isBase) && !(objB->entityTags & EntityTags::isBoss)) return false; // TBD
+    if (rb.team == (Entity*)objB->game->arena && (pa.flags & PhysicsFlags::isBase)) return false;
 
     bool isARect = pa.sides == 2;
     bool isBRect = pb.sides == 2;
@@ -81,6 +81,15 @@ bool ObjectEntity::isColliding(ObjectEntity* objA, ObjectEntity* objB) {
         double dY = posA.y - posB.y;
         double rSum = pa.size + pb.size;
         return dX * dX + dY * dY <= rSum * rSum;
+    }
+}
+
+ObjectEntity* ObjectEntity::topOwner() {
+    ObjectEntity* top = this;
+    while (true) {
+        Entity* o = top->relationsData.owner.get();
+        if (!ObjectEntity::isObject(o) || o->hash == 0) return top;
+        top = (ObjectEntity*)o;
     }
 }
 

@@ -67,6 +67,7 @@ public:
     virtual void applyPhysics();
     void setParent(ObjectEntity* parent);
     Vector getWorldPosition();
+    ObjectEntity* topOwner();
     void setGlobalEntity();
     void scale(double value);
     void tick(int tick) override;

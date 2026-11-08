@@ -55,12 +55,7 @@ void LivingEntity::receiveDamage(LivingEntity* source, double amount) {
     if (healthData.health <= 0.0001) {
         healthData.setHealth(0);
 
-        ObjectEntity* killer = source;
-        while (true) {
-            Entity* o = killer->relationsData.owner.get();
-            if (!ObjectEntity::isObject(o) || o->hash == 0) break;
-            killer = (ObjectEntity*)o;
-        }
+        ObjectEntity* killer = source->topOwner();
 
         if (LivingEntity::isLive(killer)) onDeath((LivingEntity*)killer);
         source->onKill(this, source);
