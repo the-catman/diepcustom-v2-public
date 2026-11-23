@@ -1,0 +1,3 @@
+[
+  {"name": "Bot", "checkpoint": "../weights/bot/bot.pt", "specialists": {"overlord": "../weights/bot-overlord/bot-overlord.pt"}}
+]

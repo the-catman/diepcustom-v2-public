@@ -1,0 +1,9 @@
+.venv/
+env/build/
+runs/
+__pycache__/
+.pytest_cache/
+env/build-*/
+live/build*/
+live/tests/out/
+live/pack/

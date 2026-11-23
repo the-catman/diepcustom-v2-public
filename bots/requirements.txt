@@ -1,0 +1,7 @@
+torch
+numpy
+pybind11
+tensorboard
+pytest
+playwright
+pillow

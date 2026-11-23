@@ -233,6 +233,13 @@ void Game::readPartyHash() {
     if (zero != std::string::npos) party = bytes.substr(zero + 1);
 }
 
+// A bots room's code stops being ours once we leave it.
+void Game::leaveParty() {
+    party_hash_wipe();
+    party.clear();
+    partyReceived = false;
+}
+
 std::string Game::partyLink() const {
     char prefix[512] = {0};
     party_link_prefix(prefix, sizeof(prefix));
@@ -271,6 +278,10 @@ void Game::onOpen() {
     spawnedThisConnection = false;
     deathPending = false;
     partyReceived = false;
+    botsLists = {};
+    botsListsReceived = false;
+    botsRoom = {};
+    botsResultReceived = false;
     ui.onNewConnection();
     rendering.onNewConnection();
     char pw[128] = {0};
@@ -285,6 +296,7 @@ void Game::onClose() {
     accepted = false;
     spawnedThisConnection = false;
     reset();
+    botsRoom = {};
     playersOnline = -1;
     pongReceived = true;
     pingSamples.clear();
@@ -365,6 +377,22 @@ void Game::onData(const uint8_t* data, size_t len) {
         case ClientBound::Compressed:
             std::printf("unexpected compressed packet\n");
             return;
+        case bots::ClientBound::Lists:
+            botsLists = bots::decodeLists(r);
+            botsListsReceived = true;
+            return;
+        case bots::ClientBound::Room: {
+            int before = botsRoom.phase;
+            botsRoom = bots::decodeRoom(r);
+            botsRoomAt = emscripten_get_now();
+            if (botsRoom.phase == bots::Playing && before != bots::Playing) botsResultReceived = false;
+            if (botsRoom.phase == bots::None && before != bots::None) leaveParty();
+            return;
+        }
+        case bots::ClientBound::Result:
+            botsResult = bots::decodeResult(r);
+            botsResultReceived = true;
+            return;
         default:
             return;
     }
@@ -406,6 +434,35 @@ void Game::sendTakeTank() {
     Writer w;
     w.u8(ServerBound::TakeTank);
     connection.send(w);
+}
+
+void Game::sendBotsCreate(const bots::Create& create) {
+    if (!accepted) return;
+    Writer w;
+    bots::encodeCreate(w, create);
+    connection.send(w);
+}
+
+void Game::sendBotsReady(const bots::Ready& ready) {
+    if (!accepted) return;
+    Writer w;
+    bots::encodeReady(w, ready);
+    connection.send(w);
+}
+
+void Game::sendBotsRematch() {
+    if (!accepted) return;
+    Writer w;
+    bots::encodeRematch(w);
+    connection.send(w);
+}
+
+void Game::sendBotsLeave() {
+    if (!accepted) return;
+    Writer w;
+    bots::encodeLeave(w);
+    connection.send(w);
+    leaveParty();
 }
 
 void Game::sendCommand(const std::string& cmd, const std::vector<std::string>& args) {

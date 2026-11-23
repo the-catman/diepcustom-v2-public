@@ -207,6 +207,7 @@ void Client::parsePacket(int header, const std::vector<uint8_t>& data) {
     }
 
     if (!Entity::exists(camera)) return;
+    if (game->onPacket && game->onPacket(this, header, r)) return;
 
     switch (header) {
         case ServerBound::Input: {

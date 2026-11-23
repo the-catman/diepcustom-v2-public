@@ -29,5 +29,10 @@ target_include_directories(gamecore PUBLIC
     ${USOCKETS}/src
     ${TP})
 
+# The websocket host: modes, the API, the client's files and the tick timer.
+add_library(host STATIC ${CMAKE_CURRENT_SOURCE_DIR}/host/Host.cpp)
+target_include_directories(host PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/host)
+target_link_libraries(host PUBLIC gamecore usockets z pthread)
+
 add_executable(server ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
-target_link_libraries(server PRIVATE gamecore usockets z pthread)
+target_link_libraries(server PRIVATE host)

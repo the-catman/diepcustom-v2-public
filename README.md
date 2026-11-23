@@ -74,6 +74,11 @@ The game container holds only the static server binary, its data and the client,
 
 Add `?canvas2d` to the URL to draw the world without WebGL2.
 
+## Bots
+
+`bots/` has bots trained to play the game, and a server mode to play against them, alone or with a friend. See
+[bots/README.md](bots/README.md).
+
 ## License
 
 AGPL-3.0, the same as [diepcustom](https://github.com/abcxff/diepcustom), which the server started as a port of. Thanks to ABCxFF and the diepcustom contributors.

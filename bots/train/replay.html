@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>replay</title>
+<style>
+    html, body { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; }
+    canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+    #canvas { z-index: 0; outline: none; }
+    #world { z-index: 1; display: none; pointer-events: none; }
+    #overlay { z-index: 2; display: none; pointer-events: none; }
+    #caption { position: absolute; z-index: 5; top: 10px; left: 14px; color: #fff; font: bold 17px Ubuntu, sans-serif;
+               text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 3px #000; pointer-events: none; white-space: pre; }
+    #bar { position: absolute; z-index: 5; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; align-items: center;
+           padding: 6px 12px; background: rgba(0, 0, 0, 0.5); color: #fff; font: bold 13px Ubuntu, sans-serif; }
+    #bar button, #bar select { font: inherit; color: #fff; background: rgba(255, 255, 255, 0.15); border: 0;
+                               border-radius: 4px; padding: 3px 9px; cursor: pointer; }
+    #bar select option { color: #000; }
+    #seek { flex: 1; }
+    #time { min-width: 92px; text-align: right; font-variant-numeric: tabular-nums; }
+    #bar { transition: opacity 0.3s; }
+    body.idle #bar { opacity: 0; }
+    body.idle, body.idle canvas { cursor: none; }
+    body.video #bar { display: none; }
+    body.video #caption { font-size: 26px; top: 14px; left: 18px; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<canvas id="world"></canvas>
+<canvas id="overlay"></canvas>
+<div style="font-family: 'Ubuntu'; position: absolute; visibility: hidden">&nbsp;</div>
+<div id="caption"></div>
+<div id="bar">
+    <button id="prev" title="Previous game (P)">&#9198;</button>
+    <button id="play" title="Play or pause (Space)">&#9208;</button>
+    <button id="next" title="Next game (N)">&#9197;</button>
+    <span id="game"></span>
+    <input id="seek" type="range" min="0" max="1000" step="1" value="0" title="Seek (Left / Right)">
+    <span id="time"></span>
+    <select id="speed" title="Speed ([ / ])">
+        <option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option>
+        <option value="2">2x</option><option value="4">4x</option>
+    </select>
+    <button id="view" title="Switch view (V)"></button>
+</div>
+<script id="data" type="application/octet-stream">/*DATA*/</script>
+<script id="wasm" type="application/octet-stream">/*WASM*/</script>
+<script id="client" type="application/octet-stream">/*CLIENT*/</script>
+<script>
+"use strict";
+// Plays recorded server messages through the game's own client: the recording stands in for the
+// server, and the page's clock for real time, so playback can pause, seek and change speed.
+const META = /*META*/null;
+const TANKS = /*TANKS*/null;
+const COLORS = /*COLORS*/null;
+
+const TICK_MS = 40;
+const FRAME_MS = 1000 / 60;
+// How long the last moment of a game stays up before the next one starts.
+const HOLD_MS = 500;
+const SPEEDS = [0.25, 0.5, 1, 2, 4];
+const SERVERBOUND_PING = 5;
+const PONG = new Uint8Array([5]);
+
+const video = !!window.REPLAY_VIDEO;
+if (video) document.body.classList.add("video");
+
+function bytesOf(id) {
+    const text = document.getElementById(id).textContent.trim();
+    const bin = atob(text);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; ++i) out[i] = bin.charCodeAt(i);
+    return out;
+}
+
+// The client's clock and frames run on the page's time.
+let now = 0;
+const realRAF = window.requestAnimationFrame.bind(window);
+const dateBase = Date.now();
+performance.now = () => now;
+Date.now = () => dateBase + now;
+let frameQueue = [];
+window.requestAnimationFrame = cb => { frameQueue.push(cb); return frameQueue.length; };
+window.cancelAnimationFrame = () => {};
+function runFrame() {
+    const queue = frameQueue;
+    frameQueue = [];
+    for (const cb of queue) cb(now);
+}
+
+// Kept in memory, so a replay neither reads nor changes what the game saved in this browser.
+const storage = {
+    getItem(k) { return Object.prototype.hasOwnProperty.call(this, k) ? String(this[k]) : null; },
+    setItem(k, v) { this[k] = String(v); },
+    removeItem(k) { delete this[k]; },
+    clear() { for (const k of Object.keys(this)) delete this[k]; },
+};
+Object.defineProperty(window, "localStorage", { configurable: true, get: () => storage });
+
+const realFetch = window.fetch.bind(window);
+window.fetch = (url, opts) => {
+    const m = String(url).match(/\/api\/(\w+)$/);
+    if (!m) return realFetch(url, opts);
+    const body = { tanks: TANKS, colors: COLORS, servers: [], commands: [] }[m[1]] ?? null;
+    return Promise.resolve(new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }));
+};
+
+// games[g][v]: one view's messages from one game, each {t: ms into the game, data}.
+let games = [];
+let game = 0, view = 0, pos = 0, playing = !video, speed = 1;
+let socket = null;
+
+class ReplaySocket {
+    constructor(url) {
+        this.url = url;
+        this.readyState = 0;
+        this.binaryType = "blob";
+        this.bufferedAmount = 0;
+        this.protocol = "";
+        this.extensions = "";
+        this.stream = games[game][view];
+        this.next = 0;
+        this.pongs = 0;
+        socket = this;
+        setTimeout(() => {
+            if (socket !== this) return;
+            this.readyState = 1;
+            if (this.onopen) this.onopen({});
+            pump();
+        });
+    }
+    send(data) {
+        const b = data instanceof Uint8Array ? data : new Uint8Array(data.buffer || data);
+        if (b[0] === SERVERBOUND_PING) this.pongs += 1;
+    }
+    close() {
+        this.readyState = 3;
+        if (socket === this) socket = null;
+    }
+}
+ReplaySocket.CONNECTING = 0;
+ReplaySocket.OPEN = 1;
+ReplaySocket.CLOSING = 2;
+ReplaySocket.CLOSED = 3;
+window.WebSocket = ReplaySocket;
+
+function deliver(s, bytes) {
+    if (s.onmessage) s.onmessage({ data: bytes.slice().buffer });
+}
+
+function pump() {
+    const s = socket;
+    if (!s || s.readyState !== 1) return;
+    for (; s.pongs > 0; --s.pongs) deliver(s, PONG);
+    while (s.next < s.stream.length && s.stream[s.next].t <= pos) deliver(s, s.stream[s.next++].data);
+}
+
+function length(g) {
+    const v = games[g][0];
+    return v.length ? v[v.length - 1].t : 0;
+}
+
+function reconnect() {
+    if (window.input) window.input.execute("lb_reconnect");
+}
+
+function load(g, at = 0) {
+    game = Math.max(0, Math.min(games.length - 1, g));
+    pos = Math.max(0, Math.min(length(game), at));
+    reconnect();
+}
+
+function seek(at) {
+    at = Math.max(0, Math.min(length(game), at));
+    // Messages only add to what the client has, so going back means starting the game over.
+    if (at < pos) {
+        pos = at;
+        reconnect();
+    } else {
+        pos = at;
+        pump();
+    }
+}
+
+function setView(v) {
+    view = ((v % META.views.length) + META.views.length) % META.views.length;
+    reconnect();
+    ui();
+}
+
+function setPlaying(p) {
+    playing = p;
+    ui();
+}
+
+function advance(ms) {
+    now += ms;
+    // The game waits for the client to connect, at the start and after each seek.
+    if (!playing || !socket || socket.readyState !== 1) return;
+    pos += ms * speed;
+    if (pos > length(game) + HOLD_MS * speed) {
+        if (game + 1 < games.length) load(game + 1);
+        else {
+            pos = length(game);
+            setPlaying(false);
+        }
+    }
+}
+
+function fmt(ms) {
+    const s = Math.max(0, ms) / 1000;
+    return Math.floor(s / 60) + ":" + (s % 60).toFixed(1).padStart(4, "0");
+}
+
+const $ = id => document.getElementById(id);
+let shown = "";
+function ui() {
+    const over = pos >= length(game);
+    const result = META.results[game];
+    const said = { win: "blue won", loss: "red won", draw: "draw" }[result] || result || "";
+    const caption = META.title + "\n" + "Game " + (game + 1) + " of " + games.length + (over && said ? "  ·  " + said : "");
+    if (caption !== shown) {
+        $("caption").textContent = caption;
+        shown = caption;
+    }
+    if (video) return;
+    $("play").innerHTML = playing ? "&#9208;" : "&#9654;";
+    $("game").textContent = (game + 1) + " / " + games.length;
+    $("seek").value = String(Math.round(1000 * pos / Math.max(length(game), 1)));
+    $("time").textContent = fmt(Math.min(pos, length(game))) + " / " + fmt(length(game));
+    $("view").textContent = META.views[view];
+    $("speed").value = String(speed);
+}
+
+let uiOff = false;
+function prepare() {
+    if (uiOff || !window.input) return;
+    window.input.set_convar("ren_ui", "false");
+    uiOff = true;
+}
+
+let last = null;
+function loop(t) {
+    const dt = last === null ? 0 : Math.min(t - last, 100);
+    last = t;
+    prepare();
+    advance(dt);
+    pump();
+    runFrame();
+    ui();
+    realRAF(loop);
+}
+
+function decode(bytes) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let at = 0;
+    const u32 = () => { const v = dv.getUint32(at, true); at += 4; return v; };
+    const out = [];
+    for (let g = u32(); g > 0; --g) {
+        const views = [];
+        for (let v = u32(); v > 0; --v) {
+            const msgs = [];
+            for (let n = u32(); n > 0; --n) {
+                const tick = u32(), len = u32();
+                msgs.push({ t: tick * TICK_MS, data: bytes.subarray(at, at + len) });
+                at += len;
+            }
+            views.push(msgs);
+        }
+        out.push(views);
+    }
+    return out;
+}
+
+function controls() {
+    $("play").onclick = () => setPlaying(!playing);
+    $("prev").onclick = () => load(game - 1);
+    $("next").onclick = () => load(game + 1);
+    $("view").onclick = () => setView(view + 1);
+    $("speed").onchange = e => { speed = Number(e.target.value); };
+    $("seek").oninput = e => seek(Number(e.target.value) / 1000 * length(game));
+    const keys = {
+        " ": () => setPlaying(!playing),
+        "ArrowLeft": () => seek(pos - 5000),
+        "ArrowRight": () => seek(pos + 5000),
+        "v": () => setView(view + 1),
+        "n": () => load(game + 1),
+        "p": () => load(game - 1),
+        "[": () => { speed = SPEEDS[Math.max(0, SPEEDS.indexOf(speed) - 1)]; ui(); },
+        "]": () => { speed = SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(speed) + 1)]; ui(); },
+    };
+    // Ahead of the client's own key handlers, which would otherwise steer and open menus.
+    const block = e => {
+        const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        if (e.type === "keydown" && keys[k] && e.target.tagName !== "SELECT") keys[k]();
+        e.stopImmediatePropagation();
+        if (keys[k]) e.preventDefault();
+    };
+    window.addEventListener("keydown", block, true);
+    window.addEventListener("keyup", block, true);
+    // The bar fades while the mouse rests, so it doesn't cover the bottom of the arena.
+    let idle = 0;
+    const wake = () => {
+        document.body.classList.remove("idle");
+        clearTimeout(idle);
+        idle = setTimeout(() => { if (!$("bar").matches(":hover")) document.body.classList.add("idle"); }, 2500);
+    };
+    window.addEventListener("mousemove", wake, true);
+    window.addEventListener("keydown", wake, true);
+    wake();
+}
+
+// For recording video: everything runs one frame at a time from outside.
+window.replay = {
+    games: () => games.length,
+    length,
+    load: (g, v) => { view = v; load(g); },
+    connected: () => !!(socket && socket.readyState === 1 && socket.next > 0 && window.input),
+    // Time passes for the client without the game moving, so the camera settles.
+    settle(frames) {
+        for (let i = 0; i < frames; ++i) {
+            prepare();
+            now += FRAME_MS;
+            pump();
+            runFrame();
+        }
+        ui();
+    },
+    frame() {
+        prepare();
+        now += FRAME_MS;
+        pos += FRAME_MS;
+        pump();
+        runFrame();
+        ui();
+        return pos <= length(game) + HOLD_MS;
+    },
+};
+
+async function start() {
+    const packed = bytesOf("data");
+    const raw = new Uint8Array(await new Response(new Blob([packed]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+    games = decode(raw);
+    window.Module = { wasmBinary: bytesOf("wasm") };
+    const script = document.createElement("script");
+    script.textContent = new TextDecoder().decode(bytesOf("client"));
+    document.body.appendChild(script);
+    if (!video) {
+        controls();
+        realRAF(loop);
+    }
+    ui();
+}
+start();
+</script>
+</body>
+</html>

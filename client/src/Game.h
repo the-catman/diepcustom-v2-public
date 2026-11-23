@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "BotsProtocol.h"
 #include "GameRendering.h"
 #include "GameUI.h"
 #include "cp5/Context.h"
@@ -73,6 +74,20 @@ public:
     std::string partyServer;
     bool joiningParty = false;
 
+    // Play against the bots: the server's bot list, our room and the last match result. They
+    // live through the Accept that every match start and end sends.
+    bool botsMode() const { return gamemode == "bots"; }
+    bots::Lists botsLists;
+    bool botsListsReceived = false;
+    bots::Room botsRoom;
+    double botsRoomAt = 0;
+    bots::Result botsResult;
+    bool botsResultReceived = false;
+    void sendBotsCreate(const bots::Create& create);
+    void sendBotsReady(const bots::Ready& ready);
+    void sendBotsRematch();
+    void sendBotsLeave();
+
     double pingAverage() const;
     void switchGamemode(const std::string& mode);
     void reconnect();
@@ -112,6 +127,7 @@ private:
 
     std::string socketUrl() const;
     void readPartyHash();
+    void leaveParty();
     void openSocket();
     void connectSocket();
     bool gamemodeChecked = false;

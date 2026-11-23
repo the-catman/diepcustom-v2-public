@@ -5,6 +5,10 @@ repoDir="$(cd "$(dirname "$0")/../.." && pwd)"
 buildDir="$repoDir/client/test/build"
 
 mkdir -p "$buildDir"
+clang++ -std=c++17 -O2 -I"$repoDir/client/src" \
+    "$repoDir/client/test/bots_protocol.cpp" -o "$buildDir/bots_protocol"
+"$buildDir/bots_protocol"
+
 ninja -C "$repoDir/server/build" gamecore
 clang++ -std=c++17 -O2 -I"$repoDir/server/src" \
     -I"$repoDir/server/third_party/uWebSockets/uSockets/src" \

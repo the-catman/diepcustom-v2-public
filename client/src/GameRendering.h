@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "Const.h"
 #include "cp5/CanvasWorld.h"
 #include "cp5/Context.h"
 #include "gl/WorldRenderer.h"
@@ -48,14 +49,15 @@ public:
         int tankId = -1;
         double scale = 0;
         int look = -1;
+        uint32_t body = 0;
         // The drawn part, from the canvas' top left.
         int w = 0, h = 0;
         // The AABB center from the tank origin, in pixels.
         double centerX = 0, centerY = 0;
     };
-    // With render false a stale icon is skipped instead of redrawn.
+    // With render false a stale icon is skipped instead of redrawn. color is the body's.
     void drawTankIcon(cp5::Context& ctx, TankIcon& icon, int tankId, double cx, double cy, double angle, double scale,
-                      bool centerAroundAABB = false, bool render = true);
+                      bool centerAroundAABB = false, bool render = true, int color = Color::Tank);
     void renderHUD(cp5::Context& ctx, Simulation& sim, double now, double mouseX, double mouseY,
                    int playersOnline, const std::string& pingText, bool hudVisible);
     void onNewConnection();
@@ -106,7 +108,7 @@ private:
     PreviewLook previewLook;
     int previewLookId = 0;
     void updatePreviewLook();
-    void renderTankIcon(TankIcon& icon, int tankId, double scale);
+    void renderTankIcon(TankIcon& icon, int tankId, double scale, uint32_t body);
     double screenRectX = 0, screenRectY = 0, screenRectW = 0, screenRectH = 0;
 
     std::unique_ptr<cp5::Context> gridTile;

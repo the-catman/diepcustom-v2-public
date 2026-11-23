@@ -65,7 +65,7 @@ public:
     // Raw party code of the team `client` will play on, or "" when the mode has none.
     std::string partyCode(Client* client);
     // Puts `client` on the team with this party code; false when no team has it.
-    bool joinParty(Client* client, const std::string& code);
+    virtual bool joinParty(Client* client, const std::string& code);
     bool attemptFactorySpawn(TankBody* tank);
     void close();
     virtual void onGameStarted();

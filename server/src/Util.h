@@ -15,6 +15,7 @@ class ObjectEntity;
 namespace util {
 
 double randomFloat();
+void seedRandom(uint64_t seed);
 
 template <typename... Args>
 void log(Args&&... args) {

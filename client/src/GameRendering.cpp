@@ -877,10 +877,11 @@ void GameRendering::updatePreviewLook() {
 }
 
 void GameRendering::drawTankIcon(cp5::Context& ctx, TankIcon& icon, int tankId, double cx, double cy, double angle,
-                                 double scale, bool centerAroundAABB, bool render) {
-    if (icon.tankId != tankId || icon.scale != scale || icon.look != previewLookId) {
+                                 double scale, bool centerAroundAABB, bool render, int color) {
+    uint32_t body = colorHex(color);
+    if (icon.tankId != tankId || icon.scale != scale || icon.look != previewLookId || icon.body != body) {
         if (!render) return;
-        renderTankIcon(icon, tankId, scale);
+        renderTankIcon(icon, tankId, scale, body);
     }
     double w = icon.w, h = icon.h;
     ctx.save();
@@ -894,7 +895,7 @@ void GameRendering::drawTankIcon(cp5::Context& ctx, TankIcon& icon, int tankId, 
     ctx.restore();
 }
 
-void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale) {
+void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale, uint32_t body) {
     std::vector<PreviewPart> parts;
     previewAddon(parts, tankdefs::preAddon(tankId));
 
@@ -919,7 +920,7 @@ void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale) {
     // Polygon bodies use a smaller base size (sides 4 -> sqrt2*32.5, sides 16 -> sqrt2*25).
     int bodySides = tankdefs::bodySides(tankId);
     double bodySize = bodySides == 4 ? M_SQRT2 * 32.5 : bodySides == 16 ? M_SQRT2 * 25 : 50;
-    PreviewPart body{bodySides, 0, 0, 0, bodySize, 0, false, colorHex(Color::Tank), false};
+    PreviewPart bodyPart{bodySides, 0, 0, 0, bodySize, 0, false, body, false};
 
     // AABB: body rect union polygon rects and rotated barrel corners, strokes excluded.
     auto partBounds = [](const PreviewPart& p, double& minX, double& minY, double& maxX, double& maxY) {
@@ -941,7 +942,7 @@ void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale) {
         }
     };
     double minX = 0, minY = 0, maxX = 0, maxY = 0;
-    partBounds(body, minX, minY, maxX, maxY);
+    partBounds(bodyPart, minX, minY, maxX, maxY);
     for (const PreviewPart& p : parts) partBounds(p, minX, minY, maxX, maxY);
 
     // The AABB sits in the middle of the canvas, with room for the strokes and debug boxes
@@ -959,6 +960,7 @@ void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale) {
     icon.tankId = tankId;
     icon.scale = scale;
     icon.look = previewLookId;
+    icon.body = body;
     icon.centerX = (minX + maxX) / 2 * scale;
     icon.centerY = (minY + maxY) / 2 * scale;
 
@@ -1024,7 +1026,7 @@ void GameRendering::renderTankIcon(TankIcon& icon, int tankId, double scale) {
     ctx.translate(w / 2.0 - icon.centerX, h / 2.0 - icon.centerY);
 
     for (const PreviewPart& p : parts) if (!p.aboveBody) drawPart(p);
-    drawPart(body);
+    drawPart(bodyPart);
     for (const PreviewPart& p : parts) if (p.aboveBody) drawPart(p);
 
     if (config::renDebugCollisions) {

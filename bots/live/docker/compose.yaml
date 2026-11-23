@@ -1,0 +1,7 @@
+# docker compose up --build: the first time builds everything, which takes a while.
+services:
+  bots:
+    build: .
+    init: true
+    ports:
+      - "127.0.0.1:8091:8091"

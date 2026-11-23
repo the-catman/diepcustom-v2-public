@@ -13,6 +13,9 @@ namespace tankdefs {
     int version();
     int levelRequirement(int tankId);
     int bodySides(int tankId);
+    // Stat i in server order, movement speed first; a max of 0 is a stat the tank doesn't have.
+    std::string statName(int tankId, int i);
+    int statMax(int tankId, int i);
     // Fills out[maxCount][8] with (angle, size, width/42, offset, isTrapezoid,
     // trapezoidDirection, distance, hasTrapLauncher).
     int barrels(int tankId, float* out, int maxCount);

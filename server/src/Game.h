@@ -13,7 +13,9 @@
 class GameServer;
 class Client;
 class ArenaEntity;
+class LivingEntity;
 class EntityManager;
+class Reader;
 
 using ArenaFactory = std::function<ArenaEntity*(GameServer*)>;
 
@@ -63,6 +65,9 @@ public:
     ArenaEntity* arena = nullptr;
     // Disconnected clients pending free; uWS .close can fire reentrantly mid-tick.
     std::vector<Client*> deadClients;
+    std::function<void(LivingEntity* victim, LivingEntity* source, double dealt)> onDamage;
+    // Sees each packet after Init before the server does; true means it was handled.
+    std::function<bool(Client* client, int header, Reader& reader)> onPacket;
 
     GameServer(ArenaFactory arenaFactory, const std::string& gamemode, const std::string& name);
     ~GameServer();

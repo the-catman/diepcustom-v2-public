@@ -100,6 +100,18 @@ EM_JS(int, tankdefs_sides_js, (int id), {
     return t && t.sides ? t.sides : 1;
 });
 
+EM_JS(char*, tankdefs_stat_name_js, (int id, int i), {
+    const t = Module.tankDefs ? Module.tankDefs.find(function(d) { return d && d.id === id; }) : null;
+    const s = t && t.stats ? t.stats[i] : null;
+    return s && s.name ? stringToNewUTF8(s.name) : 0;
+});
+
+EM_JS(int, tankdefs_stat_max_js, (int id, int i), {
+    const t = Module.tankDefs ? Module.tankDefs.find(function(d) { return d && d.id === id; }) : null;
+    const s = t && t.stats ? t.stats[i] : null;
+    return s ? (s.max | 0) : 0;
+});
+
 EM_JS(int, tankdefs_barrels_js, (int id, float* out, int maxCount), {
     const t = Module.tankDefs ? Module.tankDefs.find(function(d) { return d && d.id === id; }) : null;
     if (!t || !t.barrels) return 0;
@@ -202,6 +214,15 @@ int version() { return tankdefs_version_js(); }
 int levelRequirement(int tankId) { return tankdefs_levelreq_js(tankId); }
 int bodySides(int tankId) { return tankdefs_sides_js(tankId); }
 int barrels(int tankId, float* out, int maxCount) { return tankdefs_barrels_js(tankId, out, maxCount); }
+int statMax(int tankId, int i) { return tankdefs_stat_max_js(tankId, i); }
+
+std::string statName(int tankId, int i) {
+    char* p = tankdefs_stat_name_js(tankId, i);
+    if (!p) return "";
+    std::string s(p);
+    free(p);
+    return s;
+}
 
 static std::string addon(int tankId, int post) {
     char* p = tankdefs_addon_js(tankId, post);

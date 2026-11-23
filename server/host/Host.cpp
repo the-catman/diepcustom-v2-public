@@ -1,0 +1,290 @@
+#include "Host.h"
+
+#include "App.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <deque>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include "Client.h"
+#include "Game.h"
+#include "Config.h"
+#include "Util.h"
+#include "Const/Enums.h"
+#include "Const/Achievements.h"
+#include "Const/TankDefinitions.h"
+#include "Const/Commands.h"
+
+#include "Gamemodes/FFA.h"
+#include "Gamemodes/Sandbox.h"
+#include "Gamemodes/Team2.h"
+#include "Gamemodes/Team4.h"
+#include "Gamemodes/Domination.h"
+#include "Gamemodes/Tag.h"
+#include "Gamemodes/Mothership.h"
+#include "Gamemodes/Maze.h"
+#include "Gamemodes/Survival.h"
+
+namespace host {
+
+namespace {
+
+struct PerSocketData {
+    Client* client = nullptr;
+    std::string ipAddress;
+    std::string gamemode;
+};
+
+std::unordered_map<std::string, int> connections;
+// A deque, so the references addMode hands out stay valid.
+std::deque<Mode> modes;
+std::string tanksJson;
+std::vector<std::function<void()>> tickHooks;
+std::vector<std::function<void(Client*)>> closeHooks;
+
+std::string readFile(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return "";
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+// The peer and the X-Forwarded-For entries form a chain; skip the trusted proxies from its end.
+std::string clientAddress(std::string_view peer, std::string_view forwarded) {
+    std::vector<std::string_view> chain;
+    while (!forwarded.empty()) {
+        size_t comma = forwarded.find(',');
+        std::string_view hop = forwarded.substr(0, comma);
+        while (!hop.empty() && (hop.front() == ' ' || hop.front() == '\t')) hop.remove_prefix(1);
+        while (!hop.empty() && (hop.back() == ' ' || hop.back() == '\t')) hop.remove_suffix(1);
+        if (!hop.empty()) chain.push_back(hop);
+        if (comma == std::string_view::npos) break;
+        forwarded.remove_prefix(comma + 1);
+    }
+    chain.push_back(peer);
+    size_t skip = std::min((size_t)config::trustProxy, chain.size() - 1);
+    return std::string(chain[chain.size() - 1 - skip]);
+}
+
+std::string mimeFor(const std::string& path) {
+    auto ends = [&](const char* e) { size_t n = std::strlen(e); return path.size() >= n && path.compare(path.size() - n, n, e) == 0; };
+    if (ends(".html")) return "text/html; charset=utf-8";
+    if (ends(".js")) return "application/javascript; charset=utf-8";
+    if (ends(".wasm")) return "application/wasm";
+    if (ends(".css")) return "text/css; charset=utf-8";
+    if (ends(".json")) return "application/json";
+    if (ends(".png")) return "image/png";
+    if (ends(".ico")) return "image/x-icon";
+    return "application/octet-stream";
+}
+
+}
+
+void init() {
+    config::init();
+    initTankDefinitions();
+    achievements::init();
+    tanksJson = readFile("data/TankDefinitions.json");
+}
+
+// Server ids count up from "aaaa" in list order.
+Mode& addMode(const char* gamemode, const char* name, ArenaFactory factory, Instancing instancing) {
+    Mode m{std::string(4, 'a'), gamemode, name, std::move(factory), instancing};
+    for (size_t i = 3, n = modes.size(); n; --i, n /= 26) m.id[i] = (char)('a' + n % 26);
+    if (instancing == Instancing::Shared) {
+        m.shared = new GameServer(m.factory, m.gamemode, m.name);
+        m.shared->id = m.id;
+    }
+    modes.push_back(std::move(m));
+    return modes.back();
+}
+
+void addStandardModes() {
+    addMode("ffa", "FFA", [](GameServer* g) { return (ArenaEntity*)new FFAArena(g); });
+    addMode("survival", "Survival", [](GameServer* g) { return (ArenaEntity*)new SurvivalArena(g); },
+            Instancing::Lobbies);
+    addMode("teams", "2 Teams", [](GameServer* g) { return (ArenaEntity*)new Teams2Arena(g); });
+    addMode("4teams", "4 Teams", [](GameServer* g) { return (ArenaEntity*)new Teams4Arena(g); });
+    addMode("dom", "Domination", [](GameServer* g) { return (ArenaEntity*)new DominationArena(g); });
+    addMode("tag", "Tag", [](GameServer* g) { return (ArenaEntity*)new TagArena(g); });
+    addMode("maze", "Maze", [](GameServer* g) { return (ArenaEntity*)new MazeArena(g); });
+    addMode("sandbox", "Sandbox", [](GameServer* g) { return (ArenaEntity*)new SandboxArena(g); },
+            Instancing::Private);
+    addMode("mot", "Mothership", [](GameServer* g) { return (ArenaEntity*)new MothershipArena(g); });
+}
+
+void onTick(std::function<void()> fn) { tickHooks.push_back(std::move(fn)); }
+
+void onClose(std::function<void(Client*)> fn) { closeHooks.push_back(std::move(fn)); }
+
+int run() {
+    const int PORT = config::serverPort;
+
+    uWS::App app;
+
+    app.ws<PerSocketData>("/*", {
+        .compression = uWS::DISABLED,
+        .maxPayloadLength = config::wssMaxMessageSize,
+        .idleTimeout = 10,
+        .maxBackpressure = 1024 * 1024,
+        .closeOnBackpressureLimit = true,
+        .upgrade = [](auto* res, auto* req, auto* context) {
+            PerSocketData data;
+            data.gamemode = std::string(req->getUrl().substr(1));
+            data.ipAddress = clientAddress(res->getRemoteAddressAsText(), req->getHeader("x-forwarded-for"));
+            res->template upgrade<PerSocketData>(std::move(data),
+                req->getHeader("sec-websocket-key"), req->getHeader("sec-websocket-protocol"),
+                req->getHeader("sec-websocket-extensions"), context);
+        },
+        .open = [](auto* ws) {
+            PerSocketData* sd = ws->getUserData();
+            std::string ip = sd->ipAddress;
+
+            int conns = connections.count(ip) ? connections[ip] : 0;
+            if (conns >= config::connectionsPerIp || bannedClients.count(ip)) { ws->close(); return; }
+
+            Mode* mode = nullptr;
+            for (Mode& m : modes) if (m.gamemode == sd->gamemode) { mode = &m; break; }
+            if (!mode) { ws->close(); return; }
+            GameServer* game = mode->shared;
+            if (mode->instancing == Instancing::Lobbies) {
+                game = GameServer::lobby(mode->factory, mode->gamemode, mode->name, mode->id);
+            } else if (!game) {
+                game = new GameServer(mode->factory, mode->gamemode, mode->name);
+                game->id = mode->id;
+                for (int i = 0; i < 8; ++i) game->partyCode += (char)(int)(util::randomFloat() * 256);
+                GameServer::instances.push_back(game);
+            }
+
+            connections[ip] = conns + 1;
+            Client* client = new Client(game);
+            client->ipAddress = ip;
+            client->sendRaw = [ws](const uint8_t* d, size_t n) {
+                ws->send(std::string_view((const char*)d, n), uWS::OpCode::BINARY);
+            };
+            client->closeWs = [ws]() { ws->close(); };
+            sd->client = client;
+        },
+        .message = [](auto* ws, std::string_view message, uWS::OpCode opCode) {
+            PerSocketData* sd = ws->getUserData();
+            if (!sd->client) return;
+            sd->client->onMessage((const uint8_t*)message.data(), message.size(), opCode == uWS::OpCode::BINARY);
+        },
+        .close = [](auto* ws, int, std::string_view) {
+            PerSocketData* sd = ws->getUserData();
+            if (sd->client) {
+                auto connection = connections.find(sd->ipAddress);
+                if (connection != connections.end()) {
+                    if (connection->second <= 1) connections.erase(connection);
+                    else connection->second -= 1;
+                }
+                Client* c = sd->client;
+                sd->client = nullptr;
+                for (auto& hook : closeHooks) hook(c);
+                c->onClose();
+                c->game->deadClients.push_back(c); // freed at end of the next tickLoop
+            }
+        }
+    });
+
+    app.get("/*", [](auto* res, auto* req) {
+        res->onAborted([]() {});
+        std::string url(req->getUrl());
+
+        if (config::enableApi && url.rfind("/" + config::apiLocation, 0) == 0) {
+            std::string sub = url.substr(config::apiLocation.size() + 1);
+            // Clients served from another origin (static dist + ?server=) fetch these.
+            auto ok = [&]() {
+                res->writeStatus("200 OK");
+                res->writeHeader("Access-Control-Allow-Origin", "*");
+                return res;
+            };
+            if (sub == "/" || sub.empty()) { ok()->end(); return; }
+            if (sub == "/tanks") { ok()->end(tanksJson); return; }
+            if (sub == "/servers") {
+                std::string j = "[";
+                for (size_t i = 0; i < modes.size(); ++i) {
+                    if (i) j += ",";
+                    j += "{\"gamemode\":\"" + modes[i].gamemode + "\",\"name\":\"" + modes[i].name +
+                         "\",\"id\":\"" + modes[i].id + "\"}";
+                }
+                j += "]";
+                ok()->end(j);
+                return;
+            }
+            if (sub == "/commands") { ok()->end(commandsJson()); return; }
+            if (sub == "/colors") {
+                std::string j = "{";
+                for (int c = 0; c <= Color::kMaxColors; ++c) {
+                    if (c) j += ",";
+                    j += "\"" + std::to_string(c) + "\":" + std::to_string(colorHex(c));
+                }
+                j += "}";
+                ok()->end(j);
+                return;
+            }
+        }
+
+        if (config::enableClient) {
+            if (url.find("..") != std::string::npos) {
+                res->writeStatus("403 Forbidden")->end();
+                return;
+            }
+            std::string urlPath = url == "/" ? "/index.html" : url;
+            std::string file = config::clientLocation + urlPath;
+            std::string body = readFile(file);
+            if (!body.empty()) {
+                res->writeStatus("200 OK");
+                res->writeHeader("Content-Type", mimeFor(urlPath));
+                res->end(body);
+                return;
+            }
+            res->writeStatus("404 Not Found");
+            res->writeHeader("Content-Type", "text/html; charset=utf-8");
+            res->end(readFile(config::clientLocation + "/404.html"));
+            return;
+        }
+        res->writeStatus("404 Not Found")->end();
+    });
+
+    struct us_timer_t* timer = us_create_timer((struct us_loop_t*)uWS::Loop::get(), 0, 0);
+    us_timer_set(timer, [](struct us_timer_t*) {
+        for (Mode& m : modes) {
+            if (!m.shared) continue;
+            if (m.shared->clients.size()) m.shared->tickLoop();
+            else m.shared->flushDeadClients(); // last client left; nobody ticks to free it otherwise
+        }
+        // An instance goes as soon as it empties.
+        auto& instances = GameServer::instances;
+        for (size_t i = 0; i < instances.size();) {
+            GameServer* g = instances[i];
+            if (g->clients.size()) {
+                g->tickLoop();
+                ++i;
+                continue;
+            }
+            g->flushDeadClients();
+            instances.erase(instances.begin() + i);
+            delete g;
+        }
+        for (auto& hook : tickHooks) hook();
+    }, (int)config::mspt, (int)config::mspt);
+
+    app.listen(PORT, [PORT](auto* token) {
+        if (token) util::log("Listening on port ", PORT);
+        else util::log("Server failed to listen on port ", PORT);
+    });
+
+    app.run();
+    return 0;
+}
+
+}

@@ -11,6 +11,7 @@
 #include "Game.h"
 #include "GameRendering.h"
 #include "TankDefs.h"
+#include "UIHelpers.h"
 
 namespace {
     constexpr int ACTION_STAT = 1;
@@ -18,35 +19,6 @@ namespace {
     constexpr int ACTION_IGNORE = 3;
     constexpr int ACTION_GAMEMODE = 4;
     constexpr int ACTION_PARTY = 5;
-
-    float approach(float value, float target, float dtMs, float rate) {
-        float k = 1.0f - std::pow(1.0f - rate, dtMs / 16.6667f);
-        return value + (target - value) * k;
-    }
-
-    double clamp01(double t) { return t < 0 ? 0 : t > 1 ? 1 : t; }
-
-    // Truncated to an int. The fades settle just under 1, so a resting panel sits at
-    // int(H/2) - 1.
-    double slideAnchor(float fade, int h, double ui) {
-        float u200 = (float)(ui * 200.0);
-        return (double)(int)(fade * ((float)(h / 2) + u200) - u200);
-    }
-
-    uint32_t blendChannel3(uint32_t rgb, float mul, float add) {
-        auto c = [&](int shift) {
-            float v = (float)((rgb >> shift) & 0xff) * mul + add;
-            return (uint32_t)std::min(255.0f, std::max(0.0f, v)) << shift;
-        };
-        return c(16) | c(8) | c(0);
-    }
-    uint32_t pastel(uint32_t rgb) { return blendChannel3(rgb, 0.6f, 102.0f); }
-
-    std::string formatCommas(long long v) {
-        std::string s = std::to_string(v);
-        for (int i = (int)s.size() - 3; i > (v < 0 ? 1 : 0); i -= 3) s.insert((size_t)i, ",");
-        return s;
-    }
 
     std::string formatTimeAlive(double seconds) {
         long long total = (long long)seconds;
@@ -56,12 +28,6 @@ namespace {
         if (hours || minutes) out += std::to_string(minutes) + "m ";
         out += std::to_string(secs) + 's';
         return out;
-    }
-
-    std::string trim(const std::string& s) {
-        size_t a = s.find_first_not_of(" \t\n\r");
-        if (a == std::string::npos) return "";
-        return s.substr(a, s.find_last_not_of(" \t\n\r") - a + 1);
     }
 }
 
@@ -208,6 +174,8 @@ void GameUI::render(cp5::Context& ctx, Game& game, double now) {
     Entity* camera = sim.getCamera();
     CameraData* cam = camera && camera->camera ? &*camera->camera : nullptr;
     bool hasPlayer = cam && sim.get(cam->player);
+    // The bots mode has its own menu in place of the spawn and death screens.
+    bool botsMode = game.botsMode();
 
     bool waitingStart = cam && (cam->flags & CameraFlags::gameWaitingStart);
     Entity* arenaEnt = sim.getArena();
@@ -215,8 +183,8 @@ void GameUI::render(cp5::Context& ctx, Game& game, double now) {
     // With a camera and a live connection but no player, the death screen shows while
     // Game::deathPending holds, else the spawn screen (unless joining is closed or the game is
     // waiting to start).
-    bool death = game.accepted && cam && !hasPlayer && game.deathPending;
-    bool spawn = game.accepted && cam && !hasPlayer && !game.deathPending && !noJoining && !waitingStart;
+    bool death = !botsMode && game.accepted && cam && !hasPlayer && game.deathPending;
+    bool spawn = !botsMode && game.accepted && cam && !hasPlayer && !game.deathPending && !noJoining && !waitingStart;
     awaitingContinue = death;
     // Neither comes up until 500ms after the last frame with neither (200ms after continuing
     // from the death screen).
@@ -233,6 +201,7 @@ void GameUI::render(cp5::Context& ctx, Game& game, double now) {
     // Continuing sends ToRespawn once. The spawn screen keeps sending Spawn every confirming
     // frame until the player shows up.
     bool confirm = enterPressed || game.padHeld[9];
+    bool botsConfirm = enterPressed || game.padPressed[9];
     enterPressed = false;
     if (deathAlpha > 0.2 && game.deathPending && (confirm || !cam)) {
         screensAfter = now + 200;
@@ -241,6 +210,7 @@ void GameUI::render(cp5::Context& ctx, Game& game, double now) {
     }
     if (spawnTarget && spawnAlpha > 0.2 && confirm) submitSpawn(game);
 
+    if (botsMode) updateBots(game);
     if (!hudLayer) hudLayer = std::make_unique<cp5::Context>(true);
     hudLayer->beginLayer((int)w, (int)h);
 
@@ -253,10 +223,14 @@ void GameUI::render(cp5::Context& ctx, Game& game, double now) {
     }
     // No HUD until the connection's first spawn.
     game.rendering.renderHUD(*hudLayer, sim, now, mx, my, game.playersOnline, pingText, game.spawnedThisConnection);
+    if (botsMode) renderBotsMatch(*hudLayer, game, now, ui, hasPlayer);
     if (game.spawnedThisConnection) {
         if (config::renStats) renderStats(*hudLayer, game, ui, mx, my);
         renderNotifications(*hudLayer, game, now, ui);
         renderClassTree(*hudLayer, game, now, hasPlayer);
+    } else if (botsMode) {
+        // The bots menu's errors come as notifications, before any spawn.
+        renderNotifications(*hudLayer, game, now, ui);
     }
     if (hasPlayer && config::renAchievements) renderAchievements(*hudLayer, game, now, ui, hasPlayer, mx);
 
@@ -266,10 +240,11 @@ void GameUI::render(cp5::Context& ctx, Game& game, double now) {
     hudLayer->compositeLayer(ctx);
     ctx.setAlpha(1);
 
-    if (config::renUpgrades) renderUpgrades(ctx, game, now, ui, mx, my);
+    if (config::renUpgrades && !botsMode) renderUpgrades(ctx, game, now, ui, mx, my);
 
-    // Dims whenever there is no player, connected or not.
-    float dimTarget = hasPlayer ? 0.0f : 1.0f;
+    // Dims whenever there is no player, connected or not. The bots mode dims for its menu
+    // and result, never while a match plays.
+    float dimTarget = (botsMode ? game.botsRoom.phase != bots::Playing : !hasPlayer) ? 1.0f : 0.0f;
     dimAlpha = approach(dimAlpha, dimTarget, dt, dimTarget > dimAlpha ? 0.05f : 0.1f);
     if (dimAlpha > 0.01) {
         ctx.setAlpha(dimAlpha * 0.4);
@@ -282,12 +257,22 @@ void GameUI::render(cp5::Context& ctx, Game& game, double now) {
 
     renderChangelog(ctx, game, ui, hasPlayer);
     renderConnecting(ctx, game, ui);
-    renderCountdown(ctx, game, now, ui, game.accepted && cam && !hasPlayer && !game.deathPending && !noJoining && waitingStart);
+    renderCountdown(ctx, game, now, ui,
+                    !botsMode && game.accepted && cam && !hasPlayer && !game.deathPending && !noJoining && waitingStart);
     renderGamemodeStack(ctx, game, ui);
     renderPartyButton(ctx, game, ui, hasPlayer, mx, my);
-    if (!hasPlayer && config::renAchievements) renderAchievements(ctx, game, now, ui, hasPlayer, mx);
+    // The tank picker takes the wheel.
+    if (!hasPlayer && config::renAchievements && botsPickerSlot < 0) renderAchievements(ctx, game, now, ui, hasPlayer, mx);
     if (deathAlpha > 0.01) renderDeathScreen(ctx, game, now, ui);
     if (spawnAlpha > 0.01) renderSpawnScreen(ctx, game, now, ui);
+    if (botsMode) {
+        renderBots(ctx, game, now, ui, botsConfirm);
+    } else {
+        botsNameUp = false;
+        botsPickerSlot = -1;
+        botsBuildTank = -1;
+        notifyShift = 0;
+    }
     renderFps(ctx, game, ui);
     if (consoleOpen) renderConsole(ctx, game, ui, now);
 
@@ -300,7 +285,7 @@ void GameUI::render(cp5::Context& ctx, Game& game, double now) {
 }
 
 void GameUI::syncTextInput() {
-    int field = consoleOpen ? 1 : (spawnAlpha > 0.7 ? 2 : 0);
+    int field = consoleOpen ? 1 : (spawnAlpha > 0.7 || botsNameUp ? 2 : 0);
     if (field != textFieldActive) {
         textFieldActive = field;
         if (!field) ui_textfield_hide();
@@ -320,22 +305,24 @@ void GameUI::syncTextInput() {
 
 // ---- Spawn / death panels ----
 
-void GameUI::renderSpawnScreen(cp5::Context& ctx, Game& game, double now, double ui) {
-    if (!nameLoaded) {
-        nameLoaded = true;
-        char buf[64] = {0};
-        ui_load_name(buf, sizeof(buf));
-        nameInput = buf;
-    }
+void GameUI::loadName() {
+    if (nameLoaded) return;
+    nameLoaded = true;
+    char buf[64] = {0};
+    ui_load_name(buf, sizeof(buf));
+    nameInput = buf;
+}
 
-    double cx = cp5::canvasWidth() / 2;
-    double cy = slideAnchor(spawnAlpha, cp5::canvasHeight(), ui);
+// The name box's text, trimmed and kept for the next visit.
+std::string GameUI::takeName() {
+    if (textFieldActive == 2) ui_textfield_read_into(nameInput);
+    nameInput = trim(nameInput);
+    if (!nameInput.empty()) ui_save_name(nameInput.c_str());
+    return nameInput;
+}
 
-    ctx.save();
-    ctx.setAlpha(spawnAlpha);
-
-    game.rendering.drawLabel(ctx, "This is the tale of...", cx, cy - 45 * ui, 24 * ui, 0xffffff);
-
+// While active the DOM input sits on it and draws the text.
+void GameUI::drawNameBox(cp5::Context& ctx, double cx, double cy, double ui, bool active) {
     // Whole pixels: truncated size, centered by int halves.
     int boxW = (int)(float)(400 * ui), boxH = (int)(float)(50 * ui);
     double boxX = cx - boxW / 2, boxY = cy - boxH / 2;
@@ -347,8 +334,7 @@ void GameUI::renderSpawnScreen(cp5::Context& ctx, Game& game, double now, double
     ctx.strokeRect(boxX, boxY, boxW, boxH);
 
     hitBoxes.push_back({boxX, boxY, (double)boxW, (double)boxH, 0, 0, CURSOR_TEXT});
-    bool nameActive = spawnAlpha > 0.7 && !consoleOpen;
-    if (nameActive) {
+    if (active) {
         tfX = boxX; tfY = boxY; tfW = boxW; tfH = boxH;
         tfFont = boxH * 0.9; tfColor = 0x000000; tfCentered = false; tfOutline = false;
     } else if (!nameInput.empty()) {
@@ -360,6 +346,19 @@ void GameUI::renderSpawnScreen(cp5::Context& ctx, Game& game, double now, double
         if (tw > boxW - 8 * ui) tx -= tw - (boxW - 8 * ui);
         ctx.fillText(nameInput, tx, cy);
     }
+}
+
+void GameUI::renderSpawnScreen(cp5::Context& ctx, Game& game, double now, double ui) {
+    loadName();
+
+    double cx = cp5::canvasWidth() / 2;
+    double cy = slideAnchor(spawnAlpha, cp5::canvasHeight(), ui);
+
+    ctx.save();
+    ctx.setAlpha(spawnAlpha);
+
+    game.rendering.drawLabel(ctx, "This is the tale of...", cx, cy - 45 * ui, 24 * ui, 0xffffff);
+    drawNameBox(ctx, cx, cy, ui, spawnAlpha > 0.7 && !consoleOpen);
     (void)now;
 
     game.rendering.drawLabel(ctx, "(press enter to spawn)", cx, cy + 39 * ui, 14 * ui, 0xffffff);
@@ -379,7 +378,8 @@ void GameUI::renderGamemodeStack(cp5::Context& ctx, Game& game, double ui) {
     Entity* camera = sim.getCamera();
     CameraData* cam = camera && camera->camera ? &*camera->camera : nullptr;
     bool hasPlayer = cam && sim.get(cam->player);
-    bool show = !hasPlayer;
+    // In the bots mode only the setup offers the other modes; leaving a room goes through it.
+    bool show = !hasPlayer && !(game.botsMode() && game.botsRoom.phase != bots::None);
     stackAlpha = approach(stackAlpha, show ? 1.0f : 0.0f, game.rendering.dt(), show ? 0.05f : 0.1f);
 
     int servers = tankdefs::serverCount();
@@ -434,7 +434,8 @@ void GameUI::renderGamemodeStack(cp5::Context& ctx, Game& game, double ui) {
 
 // "Copy party link": top right without a player, once the server sent our party code.
 void GameUI::renderPartyButton(cp5::Context& ctx, Game& game, double ui, bool hasPlayer, double mx, double my) {
-    bool show = game.accepted && !game.gamemode.empty() && !hasPlayer && game.partyReceived;
+    // The bots mode puts its room's link in the waiting screen.
+    bool show = game.accepted && !game.gamemode.empty() && !hasPlayer && game.partyReceived && !game.botsMode();
     partyAlpha = approach(partyAlpha, show ? 1.0f : 0.0f, game.rendering.dt(), show ? 0.05f : 0.1f);
     if (partyAlpha < 0.01) return;
 
@@ -801,7 +802,7 @@ void GameUI::renderNotifications(cp5::Context& ctx, Game& game, double now, doub
     auto unit = GameRendering::uiUnits;
     GameRendering& r = game.rendering;
     ctx.save();
-    ctx.translate((float)(cp5::canvasWidth() / 2), dimAlpha * ((float)(stackBottomU * ui) - unit(24)) + unit(24));
+    ctx.translate((float)(cp5::canvasWidth() / 2), dimAlpha * ((float)(stackBottomU * ui) - unit(24)) + unit(24) + notifyShift);
     float y = unit(20) * 0.5f;
 
     for (size_t i = 0; i < notifications.size();) {
@@ -1790,12 +1791,7 @@ void GameUI::renderConsole(cp5::Context& ctx, Game& game, double ui, double now)
 
 // Enter and Start work once a screen's fade passes 0.2. The name box only takes typing from
 // 0.7, so before that the stored name is used.
-void GameUI::submitSpawn(Game& game) {
-    if (textFieldActive == 2) ui_textfield_read_into(nameInput);
-    nameInput = trim(nameInput);
-    if (!nameInput.empty()) ui_save_name(nameInput.c_str());
-    game.sendSpawn(nameInput);
-}
+void GameUI::submitSpawn(Game& game) { game.sendSpawn(takeName()); }
 
 // Gamepad: holding X (keys 1-4) or A (keys 5-8) with a d-pad direction upgrades a stat.
 // (Start held confirms the death and spawn screens in render().)
@@ -1839,12 +1835,20 @@ bool GameUI::onKeyDown(int key, Game& game) {
         return false;
     }
 
-    // Enter confirms the spawn and death screens on the next UI pass.
+    if (key == Key::Escape && botsPickerSlot >= 0) {
+        botsPickerSlot = -1;
+        return true;
+    }
+    if (key == Key::Escape && botsBuildTank >= 0) {
+        closeBotsBuild(game);
+        return true;
+    }
+    // Enter confirms the spawn and death screens (and the bots menu) on the next UI pass.
     if (key == Key::Enter) {
         enterPressed = true;
-        if ((spawnTarget && spawnAlpha > 0.2) || (deathTarget && deathAlpha > 0.2)) return true;
+        if ((spawnTarget && spawnAlpha > 0.2) || (deathTarget && deathAlpha > 0.2) || botsNameUp) return true;
     }
-    if (spawnAlpha > 0.7) {
+    if (spawnAlpha > 0.7 || botsNameUp) {
         // Consume Escape so the browser doesn't revert the field (Tab never gets here).
         if (key == Key::Escape) return true;
         return false;
@@ -1909,7 +1913,12 @@ bool GameUI::onMouseUp(Game& game) {
         else if (hb.action == ACTION_UPGRADE) game.sendTankUpgrade(hb.arg);
         else if (hb.action == ACTION_GAMEMODE) game.switchGamemode(tankdefs::serverGamemode(hb.arg));
         else if (hb.action == ACTION_PARTY) ui_copy_text(game.partyLink().c_str());
-        else if (hb.action == ACTION_IGNORE) {
+        else if (hb.action == BOTS_LINK) {
+            ui_copy_text(game.partyLink().c_str());
+            botsCopiedAt = emscripten_get_now();
+        } else if (hb.action >= BOTS_FORMAT) {
+            botsClick(game, hb.action, hb.arg);
+        } else if (hb.action == ACTION_IGNORE) {
             Entity* camera = game.simulation.getCamera();
             if (camera && camera->camera) {
                 int level = (int)camera->camera->level;

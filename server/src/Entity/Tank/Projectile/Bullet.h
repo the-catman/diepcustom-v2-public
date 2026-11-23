@@ -12,6 +12,9 @@ public:
     void onKill(LivingEntity* killedEntity, LivingEntity* weapon) override;
     void tick(int tick) override;
 
+    int firedTick() const { return spawnTick; }
+    double lifeTicks() const { return lifeLength; }
+
 protected:
     Ref<Barrel> barrelEntity;
     int spawnTick = 0;

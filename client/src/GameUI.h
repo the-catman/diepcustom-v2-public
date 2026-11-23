@@ -1,10 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "BotsProtocol.h"
 #include "Const.h"
 #include "GameRendering.h"
 #include "cp5/Context.h"
@@ -32,7 +35,7 @@ public:
     void clearNotifications();
     void onNewConnection();
     // A text field is up (the DOM input owns typing and its default key actions).
-    bool typing() const { return config::renUi && (spawnAlpha > 0.7 || consoleOpen); }
+    bool typing() const { return config::renUi && (spawnAlpha > 0.7 || consoleOpen || botsNameUp); }
     // The open console takes the keyboard: game keys and mouse buttons read as up.
     bool capturesKeys() const { return config::renUi && consoleOpen; }
     // The topmost UI element under the cursor blocks fire and right click.
@@ -85,6 +88,8 @@ private:
     bool changelogDone = false;
     bool changelogLoaded = false;
     std::vector<std::string> changelog;
+    // Pushes the notifications below the bots mode's match clock.
+    float notifyShift = 0;
     // One per achievement: fade, list slot and cached card.
     struct AchievementCard {
         double unlockedAt = 0; // 0 = never, or already unlocked when the list was built
@@ -194,6 +199,9 @@ private:
     std::unique_ptr<cp5::Context> upgradeLayer;
     std::unique_ptr<cp5::Context> stackLayer;
 
+    void loadName();
+    std::string takeName();
+    void drawNameBox(cp5::Context& ctx, double cx, double cy, double ui, bool active);
     void renderSpawnScreen(cp5::Context& ctx, Game& game, double now, double ui);
     void renderDeathScreen(cp5::Context& ctx, Game& game, double now, double ui);
     void renderGamemodeStack(cp5::Context& ctx, Game& game, double ui);
@@ -221,4 +229,83 @@ private:
     void syncTextInput();
     void submitSpawn(Game& game);
     void padInput(Game& game, bool hasPlayer);
+
+    // ---- Play against the bots (BotsUI.cpp) ----
+    enum BotsAction {
+        BOTS_FORMAT = 16, BOTS_WHO_PREV, BOTS_WHO_NEXT, BOTS_TANK_PREV, BOTS_TANK_NEXT, BOTS_PICKER_OPEN, BOTS_PICK,
+        BOTS_PICKER_CLOSE, BOTS_BEST, BOTS_START, BOTS_READY, BOTS_LINK, BOTS_LEAVE, BOTS_REMATCH, BOTS_BUILD_OPEN,
+        BOTS_BUILD_CLOSE, BOTS_BUILD_SET, BOTS_BUILD_LESS, BOTS_BUILD_MORE, BOTS_BUILD_RESET,
+    };
+    // Two slots a side (blue 0 and 1, red 2 and 3), kept across formats. who is 0 for a player or
+    // k for bot k - 1; the bot's name finds it again when the list changes.
+    struct BotsSlot {
+        int who = 0;
+        std::string bot;
+        int tank = -1;
+    };
+    struct BotsSetup {
+        int format = 0;
+        bool best = false;
+        BotsSlot slots[4];
+    };
+    BotsSetup botsSetup;
+    bool botsSetupLoaded = false;
+    // Screens: setup, room (waiting and countdown), match, result. Each draws the room as it was
+    // when last up, so a screen fading out keeps its content.
+    int botsScreen = -1;
+    float botsAlpha[4] = {};
+    bots::Room botsShown[4];
+    double botsShownAt[4] = {};
+    float botsSpectateAlpha = 0;
+    bool botsNameUp = false;
+    double botsStartHeld = 0; // Start stays off until the room answers, or this passes
+    double botsCopiedAt = -1e9;
+    bool botsVoted = false;
+    int botsPhaseSeen = 0;
+    // Shown match seconds never run backwards between room updates.
+    int botsClockShown = 0;
+    int botsPickerSlot = -1;
+    int botsPickerShown = 0; // the slot the picker last drew, kept while it fades out
+    float botsPickerAlpha = 0;
+    double botsPickerScroll = 0;
+    // The player's own builds by tank, where they differ from the usual one; kept for the next visit.
+    std::map<int, bots::Build> botsBuilds;
+    bool botsBuildsLoaded = false;
+    // The tank whose build is open, or -1, and the screen it opened on; the tank last drawn, kept while it fades out.
+    int botsBuildTank = -1;
+    int botsBuildScreen = 0;
+    int botsBuildShown = 0;
+    float botsBuildAlpha = 0;
+    double botsMx = 0, botsMy = 0;
+    std::vector<GameRendering::TankIcon> botsPickerIcons;
+    GameRendering::TankIcon botsSlotIcons[4];
+    GameRendering::TankIcon botsBuildIcon;
+    GameRendering::TankIcon botsRoomIcons[bots::MAX_SEATS];
+    GameRendering::TankIcon botsHudIcons[bots::MAX_SEATS];
+    GameRendering::TankIcon botsResultIcons[bots::MAX_SEATS];
+
+    void updateBots(Game& game);
+    void renderBots(cp5::Context& ctx, Game& game, double now, double ui, bool confirm);
+    void renderBotsSetup(cp5::Context& ctx, Game& game, double ui, bool confirm);
+    void renderBotsPicker(cp5::Context& ctx, Game& game, double ui);
+    void renderBotsBuild(cp5::Context& ctx, Game& game, double ui);
+    void renderBotsRoom(cp5::Context& ctx, Game& game, double now, double ui, bool confirm);
+    void renderBotsMatch(cp5::Context& ctx, Game& game, double now, double ui, bool hasPlayer);
+    void renderBotsResult(cp5::Context& ctx, Game& game, double ui);
+    void botsButton(cp5::Context& ctx, double x, double y, double w, double h, uint32_t rgb, const std::string& label,
+                    int action, int arg, bool enabled, double ui, bool selected = false);
+    void buildStrip(cp5::Context& ctx, double left, double top, uint32_t rgb, int tank, bool live, double ui);
+    void botsClick(Game& game, int action, int arg);
+    void botsStart(Game& game);
+    void loadBotsSetup();
+    void saveBotsSetup() const;
+    void fitBotsSetup(const Game& game);
+    bool botsOverlay() const { return botsPickerSlot >= 0 || botsBuildTank >= 0; }
+    // The build the player takes the tank with, and the same if it isn't the tank's usual one.
+    bots::Build botsBuild(const Game& game, int tank) const;
+    std::optional<bots::Build> botsOwnBuild(const Game& game, int tank) const;
+    void setBotsBuild(const Game& game, int tank, const bots::Build& build);
+    void closeBotsBuild(Game& game);
+    void loadBotsBuilds();
+    void saveBotsBuilds() const;
 };

@@ -50,7 +50,9 @@ void LivingEntity::receiveDamage(LivingEntity* source, double amount) {
     }
 
     lastDamageTick = game->tick;
+    double before = healthData.health;
     healthData.setHealth(healthData.health - amount);
+    if (game->onDamage) game->onDamage(this, source, before - std::max(healthData.health, 0.0));
 
     if (healthData.health <= 0.0001) {
         healthData.setHealth(0);

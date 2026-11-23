@@ -13,11 +13,17 @@ static uint64_t initialSeed() {
     return std::random_device{}() ^ (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
 }
 
-double randomFloat() {
+static std::mt19937_64& generator() {
     static thread_local std::mt19937_64 gen(initialSeed());
-    static thread_local std::uniform_real_distribution<double> dist(0.0, 1.0);
-    return dist(gen);
+    return gen;
 }
+
+double randomFloat() {
+    static thread_local std::uniform_real_distribution<double> dist(0.0, 1.0);
+    return dist(generator());
+}
+
+void seedRandom(uint64_t seed) { generator().seed(seed); }
 
 std::string truncateUtf8(const std::string& s, size_t maxUnits) {
     // Cuts like JS .slice(0, maxUnits): UTF-16 code units, a non-BMP codepoint counting 2.
